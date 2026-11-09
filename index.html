@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>店铺周报看板</title>
+<style>
+:root {
+  --bg: #f5f6f7; --card: #fff; --text: #1f2329; --sub: #646a73; --line: #dee0e3; --fill: #eff0f1;
+  --accent: #3370ff; --accent-2: #7f3bf5; --up: #00a870; --down: #f54a45; --bar: #3370ff; --bar-2: #c3d4ff;
+}
+:root[data-theme="dark"] {
+  --bg: #1a1a1a; --card: #232324; --text: #ebebeb; --sub: #a6a6a6; --line: #373737; --fill: #2e2e30;
+  --accent: #4c88ff; --accent-2: #9f6ffb; --up: #32c48d; --down: #f76964; --bar: #4c88ff; --bar-2: #2f4a85;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Segoe UI", sans-serif; padding: 12px; }
+h1 { font-size: 16px; margin: 0 0 10px; font-weight: 650; }
+h2 { font-size: 13px; margin: 18px 0 8px; color: var(--sub); font-weight: 600; }
+.bar-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+select, input, button { font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+select { min-width: 0; max-width: 100%; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pill { border-radius: 999px; padding: 3px 10px; font-size: 12px; background: var(--fill); border-color: transparent; }
+.pill.on { background: var(--accent); color: #fff; }
+.range { margin-top: 6px; color: var(--sub); font-size: 12px; }
+.custom { display: none; gap: 6px; margin-top: 6px; align-items: center; }
+.custom.show { display: flex; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.kpi .k { font-size: 12px; color: var(--sub); }
+.kpi .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.kpi .d { font-size: 12px; font-variant-numeric: tabular-nums; }
+.d.up { color: var(--up); } .d.down { color: var(--down); } .d.flat { color: var(--sub); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.chart svg { display: block; width: 100%; height: auto; }
+.chart text { fill: var(--sub); font-size: 10px; }
+.legend { font-size: 12px; color: var(--sub); display: flex; gap: 12px; margin-bottom: 4px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--sub); font-weight: 600; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td .s { color: var(--sub); }
+a { color: var(--accent); text-decoration: none; }
+.msg { padding: 10px 12px; border-radius: 8px; background: var(--fill); color: var(--sub); margin-top: 10px; }
+.msg.err { color: var(--down); }
+.progress { height: 4px; background: var(--fill); border-radius: 2px; overflow: hidden; margin-top: 8px; display: none; }
+.progress.show { display: block; }
+.progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.note { font-size: 12px; color: var(--sub); margin-top: 6px; }
+.empty { color: var(--sub); font-size: 12px; padding: 8px 0; }
+</style>
+</head>
+<body>
+<h1>店铺周报看板</h1>
+
+<div class="bar-top">
+  <label>订单数据 <select id="srcOrder"></select></label>
+  <label>视频数据 <select id="srcVideo"></select></label>
+  <button id="reload" title="重新从表格读取数据">刷新数据</button>
+</div>
+<div class="pills" id="pills">
+  <button class="pill" data-p="lastweek">上周</button>
+  <button class="pill" data-p="thisweek">本周</button>
+  <button class="pill" data-p="7">近 7 天</button>
+  <button class="pill" data-p="28">近 28 天</button>
+  <button class="pill" data-p="lastmonth">上月</button>
+  <button class="pill" data-p="custom">自定义</button>
+</div>
+<div class="custom" id="custom"><input type="date" id="cs"> ~ <input type="date" id="ce"> <button id="apply">应用</button></div>
+<div class="range" id="range"></div>
+<div class="progress" id="progress"><i></i></div>
+<div id="msg" class="msg">正在连接多维表格…</div>
+
+<div id="out" hidden>
+  <h2>订单</h2>
+  <div class="kpis" id="orderKpis"></div>
+  <h2>每日订单与销售额</h2>
+  <div class="card chart" id="orderChart"></div>
+  <h2>热销 SKU(不含已取消)</h2>
+  <div class="card" id="topSku"></div>
+
+  <h2>视频(按发布日期)</h2>
+  <div class="kpis" id="videoKpis"></div>
+  <div class="note">视频的播放、GMV 是写入表格时导出的累计值。</div>
+  <h2>达人 GMV 排行</h2>
+  <div class="card" id="topCreator"></div>
+  <h2>视频 GMV 排行</h2>
+  <div class="card" id="topVideo"></div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
