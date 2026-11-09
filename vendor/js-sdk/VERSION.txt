@@ -1,0 +1,1 @@
+@lark-base-open/js-sdk 1.0.2 (ISC License), copied from npm so the dashboard does not depend on an external CDN.

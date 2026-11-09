@@ -3,97 +3,201 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>店铺周报看板</title>
+<title>店铺经营看板</title>
 <style>
 :root {
-  --bg: #f5f6f7; --card: #fff; --text: #1f2329; --sub: #646a73; --line: #dee0e3; --fill: #eff0f1;
-  --accent: #3370ff; --accent-2: #7f3bf5; --up: #00a870; --down: #f54a45; --bar: #3370ff; --bar-2: #c3d4ff;
+  color-scheme: light;
+  --page: #f5f5f7; --card: #ffffff; --card-2: #fbfbfd;
+  --text: #1d1d1f; --text-2: #6e6e73; --muted: #86868b;
+  --hair: rgba(0,0,0,.08); --grid: #ececef; --axis: #d2d2d7; --fill: rgba(118,118,128,.12); --fill-2: rgba(118,118,128,.08);
+  --accent: #0071e3; --up: #1a7f37; --down: #d70015; --warn: #b25000;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 24px rgba(0,0,0,.05);
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4; --series-6: #008300;
+  --prev: #c7c7cc;
+  --seq-1: #cde2fb; --seq-2: #9ec5f4; --seq-3: #6da7ec; --seq-4: #2a78d6; --seq-5: #184f95;
 }
 :root[data-theme="dark"] {
-  --bg: #1a1a1a; --card: #232324; --text: #ebebeb; --sub: #a6a6a6; --line: #373737; --fill: #2e2e30;
-  --accent: #4c88ff; --accent-2: #9f6ffb; --up: #32c48d; --down: #f76964; --bar: #4c88ff; --bar-2: #2f4a85;
+  color-scheme: dark;
+  --page: #000000; --card: #1c1c1e; --card-2: #232325;
+  --text: #f5f5f7; --text-2: #a1a1a6; --muted: #8e8e93;
+  --hair: rgba(255,255,255,.1); --grid: #2c2c2e; --axis: #3a3a3c; --fill: rgba(118,118,128,.24); --fill-2: rgba(118,118,128,.16);
+  --accent: #0a84ff; --up: #30d158; --down: #ff453a; --warn: #ff9f0a;
+  --shadow: none;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181; --series-6: #008300;
+  --prev: #48484a;
+  --seq-1: #104281; --seq-2: #1c5cab; --seq-3: #2a78d6; --seq-4: #5598e7; --seq-5: #9ec5f4;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--bg); color: var(--text); }
-body { font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Segoe UI", sans-serif; padding: 12px; }
-h1 { font-size: 16px; margin: 0 0 10px; font-weight: 650; }
-h2 { font-size: 13px; margin: 18px 0 8px; color: var(--sub); font-weight: 600; }
-.bar-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-select, input, button { font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
-select { min-width: 0; max-width: 100%; }
-button { cursor: pointer; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-button:disabled { opacity: .5; cursor: not-allowed; }
-.pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.pill { border-radius: 999px; padding: 3px 10px; font-size: 12px; background: var(--fill); border-color: transparent; }
-.pill.on { background: var(--accent); color: #fff; }
-.range { margin-top: 6px; color: var(--sub); font-size: 12px; }
-.custom { display: none; gap: 6px; margin-top: 6px; align-items: center; }
-.custom.show { display: flex; }
-.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
-.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
-.kpi .k { font-size: 12px; color: var(--sub); }
-.kpi .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
-.kpi .d { font-size: 12px; font-variant-numeric: tabular-nums; }
-.d.up { color: var(--up); } .d.down { color: var(--down); } .d.flat { color: var(--sub); }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
-.chart svg { display: block; width: 100%; height: auto; }
-.chart text { fill: var(--sub); font-size: 10px; }
-.legend { font-size: 12px; color: var(--sub); display: flex; gap: 12px; margin-bottom: 4px; }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { color: var(--sub); font-weight: 600; }
-td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-td .s { color: var(--sub); }
-a { color: var(--accent); text-decoration: none; }
-.msg { padding: 10px 12px; border-radius: 8px; background: var(--fill); color: var(--sub); margin-top: 10px; }
+html, body { margin: 0; background: var(--page); color: var(--text); }
+body { font: 13px/1.47 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; padding: 20px 16px 32px; }
+button, select, input { font: inherit; color: inherit; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 40%, transparent); outline-offset: 1px; }
+.wrap { max-width: 1440px; margin: 0 auto; }
+
+/* 顶部 */
+.head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.eyebrow { font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: .02em; }
+h1 { margin: 2px 0 0; font-size: 26px; line-height: 1.15; font-weight: 700; letter-spacing: -.02em; }
+.head-r { display: flex; gap: 8px; align-items: center; }
+.ghost { border: 0; background: var(--fill); border-radius: 980px; padding: 6px 14px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.ghost:hover { background: color-mix(in srgb, var(--fill) 70%, var(--text) 8%); }
+.ghost:disabled { opacity: .45; cursor: default; }
+.primary { border: 0; background: var(--accent); color: #fff; border-radius: 980px; padding: 6px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.size { display: inline-flex; background: var(--fill); border-radius: 980px; padding: 2px; }
+.size button { border: 0; background: transparent; border-radius: 980px; padding: 4px 10px; font-size: 12px; cursor: pointer; color: var(--text-2); }
+.size button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+
+/* 筛选行 */
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 6px; }
+.seg { display: inline-flex; background: var(--fill); border-radius: 9px; padding: 2px; flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; border-radius: 7px; padding: 5px 12px; font-size: 13px; font-weight: 500; cursor: pointer; color: var(--text); }
+.seg button.on { background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 1px 1px rgba(0,0,0,.04); }
+.src { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.src label { font-size: 12px; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+select, input[type=date] { border: 1px solid var(--hair); background: var(--card); border-radius: 8px; padding: 5px 8px; max-width: 260px; }
+.custom { display: none; gap: 6px; align-items: center; }
+.custom.show { display: inline-flex; }
+.range { font-size: 12px; color: var(--muted); margin: 4px 0 18px; }
+.note { font-size: 12px; color: var(--text-2); margin: -10px 0 16px; }
+
+/* 消息 */
+.msg { padding: 10px 14px; border-radius: 12px; background: var(--card); box-shadow: var(--shadow); color: var(--text-2); margin-bottom: 16px; }
 .msg.err { color: var(--down); }
-.progress { height: 4px; background: var(--fill); border-radius: 2px; overflow: hidden; margin-top: 8px; display: none; }
+.progress { height: 3px; background: var(--fill); border-radius: 2px; overflow: hidden; margin: -8px 0 16px; display: none; }
 .progress.show { display: block; }
 .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
-.note { font-size: 12px; color: var(--sub); margin-top: 6px; }
-.empty { color: var(--sub); font-size: 12px; padding: 8px 0; }
+#out.loading { opacity: .5; transition: opacity .2s; }
+
+/* 分区 */
+.section { margin: 26px 0 10px; display: flex; align-items: baseline; gap: 10px; }
+.section h2 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
+.section span { font-size: 12px; color: var(--muted); }
+
+/* 指标 */
+.kpis { display: grid; grid-template-columns: minmax(260px, 1.4fr) repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.tile { background: var(--card); border-radius: 18px; padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
+.tile .k { font-size: 12px; color: var(--text-2); font-weight: 500; }
+.tile .v { font-size: 24px; font-weight: 650; letter-spacing: -.02em; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .v small { font-size: 13px; font-weight: 500; color: var(--text-2); margin-left: 4px; }
+.tile .d { font-size: 12px; margin-top: 2px; color: var(--muted); }
+.tile .sub { font-size: 12px; color: var(--text-2); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile.hero { grid-row: span 2; display: flex; flex-direction: column; }
+.tile.hero .v { font-size: 48px; line-height: 1.05; margin-top: 8px; }
+.tile.hero .spark { margin-top: auto; padding-top: 10px; }
+.d .up { color: var(--up); font-weight: 600; } .d .down { color: var(--down); font-weight: 600; }
+
+/* 洞察 */
+.insights { background: var(--card); border-radius: 18px; box-shadow: var(--shadow); padding: 6px 16px; }
+.insights li { list-style: none; display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--hair); }
+.insights li:last-child { border-bottom: 0; }
+.insights ul { margin: 0; padding: 0; }
+.insights .ic { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; }
+.ic.up { background: var(--up); } .ic.down { background: var(--down); } .ic.info { background: var(--series-1); } .ic.warn { background: var(--warn); }
+.insights b { font-weight: 600; }
+
+/* 图表卡片 */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 12px; }
+@media (max-width: 520px) { .grid { grid-template-columns: 1fr; } .kpis { grid-template-columns: 1fr 1fr; } .tile.hero { grid-column: 1 / -1; grid-row: auto; } }
+.card { background: var(--card); border-radius: 18px; box-shadow: var(--shadow); padding: 14px 16px 12px; min-width: 0; position: relative; }
+.card.wide { grid-column: 1 / -1; }
+.card-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.card-h h3 { margin: 0; font-size: 14px; font-weight: 650; }
+.card-h p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.tbtn { border: 0; background: var(--fill-2); border-radius: 980px; padding: 3px 10px; font-size: 11px; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.legend i.line { height: 2px; width: 14px; border-radius: 1px; vertical-align: 3px; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .lbl { fill: var(--text-2); }
+.chart .val { fill: var(--text); font-weight: 600; }
+.chart .hit { fill: transparent; cursor: default; }
+.chart .hit:hover + .bar, .chart .bar:hover { filter: brightness(1.12); }
+.empty { color: var(--muted); font-size: 12px; padding: 18px 0; text-align: center; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--hair); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td .s { color: var(--muted); font-size: 11px; }
+tr:last-child td { border-bottom: 0; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.tablewrap { max-height: 360px; overflow: auto; }
+
+/* 分段条 */
+.segbar { display: flex; gap: 2px; height: 28px; margin: 6px 0 10px; }
+.segbar div { border-radius: 4px; min-width: 0; color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; padding: 0 6px; white-space: nowrap; overflow: visible; }
+.segbar div.dark-ink { color: #1d1d1f; }
+
+/* 提示框 */
+.tip { position: fixed; z-index: 10; pointer-events: none; background: var(--card); color: var(--text); border-radius: 10px; padding: 8px 10px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.18); font-size: 12px; min-width: 120px; border: 1px solid var(--hair); display: none; }
+.tip .t { color: var(--muted); margin-bottom: 4px; }
+.tip .r { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.tip .r span { color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+.tip .r i { width: 12px; height: 2px; border-radius: 1px; display: inline-block; }
+.tip .r b { font-weight: 650; font-variant-numeric: tabular-nums; }
+
+/* 仪表盘模式 */
+body.dash .size { display: none; }
+body.dash-view #srcbar { display: none; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
-<h1>店铺周报看板</h1>
+<div class="wrap">
+  <div class="head">
+    <div><div class="eyebrow" id="eyebrow">TikTok Shop</div><h1 id="title">店铺经营看板</h1></div>
+    <div class="head-r">
+      <div class="size" id="size" title="调整侧边栏大小(飞书不一定支持,不行时可以拖动侧边栏左边缘)"><button data-s="small">小</button><button data-s="medium">中</button><button data-s="large">大</button></div>
+      <button class="ghost" id="reload" title="重新从表格读取数据">刷新</button>
+    </div>
+  </div>
 
-<div class="bar-top">
-  <label>订单数据 <select id="srcOrder"></select></label>
-  <label>视频数据 <select id="srcVideo"></select></label>
-  <button id="reload" title="重新从表格读取数据">刷新数据</button>
+  <div class="filters">
+    <div class="seg" id="pills" role="group" aria-label="时间段">
+      <button data-p="lastweek">上周</button><button data-p="thisweek">本周</button><button data-p="7">近 7 天</button>
+      <button data-p="28">近 28 天</button><button data-p="lastmonth">上月</button><button data-p="custom">自定义</button>
+    </div>
+    <div class="custom" id="custom"><input type="date" id="cs" aria-label="开始日期"> – <input type="date" id="ce" aria-label="结束日期"> <button class="ghost" id="apply">应用</button></div>
+    <div class="src" id="srcbar">
+      <label>订单 <select id="srcOrder"></select></label>
+      <label>视频 <select id="srcVideo"></select></label>
+      <button id="saveCfg" class="primary" hidden>保存到仪表盘</button>
+    </div>
+  </div>
+  <div class="range" id="range"></div>
+  <div class="note" id="cfgHint" hidden>选好店铺和默认时间段后点「保存到仪表盘」。之后在仪表盘里可以全屏查看,时间段也能临时切换。</div>
+  <div class="progress" id="progress"><i></i></div>
+  <div id="msg" class="msg">正在连接多维表格…</div>
+
+  <div id="out" hidden>
+    <div class="kpis" id="kpis"></div>
+
+    <div class="section"><h2>数据洞察</h2><span>根据所选时间段自动生成</span></div>
+    <div class="insights"><ul id="insights"></ul></div>
+
+    <div class="section"><h2>订单</h2><span>按下单时间(店铺当地时间)统计,不含已取消</span></div>
+    <div class="grid">
+      <div class="card wide" data-card="sales"></div>
+      <div class="card" data-card="orders"></div>
+      <div class="card" data-card="status"></div>
+      <div class="card" data-card="heat"></div>
+      <div class="card" data-card="sku"></div>
+      <div class="card" data-card="state"></div>
+      <div class="card" data-card="aovdist"></div>
+    </div>
+
+    <div class="section"><h2>视频与达人</h2><span>按视频发布日期统计;播放、GMV 为写入表格时的累计值</span></div>
+    <div class="grid">
+      <div class="card wide" data-card="vdaily"></div>
+      <div class="card" data-card="creators"></div>
+      <div class="card" data-card="vfunnel"></div>
+      <div class="card wide" data-card="videos"></div>
+    </div>
+  </div>
 </div>
-<div class="pills" id="pills">
-  <button class="pill" data-p="lastweek">上周</button>
-  <button class="pill" data-p="thisweek">本周</button>
-  <button class="pill" data-p="7">近 7 天</button>
-  <button class="pill" data-p="28">近 28 天</button>
-  <button class="pill" data-p="lastmonth">上月</button>
-  <button class="pill" data-p="custom">自定义</button>
-</div>
-<div class="custom" id="custom"><input type="date" id="cs"> ~ <input type="date" id="ce"> <button id="apply">应用</button></div>
-<div class="range" id="range"></div>
-<div class="progress" id="progress"><i></i></div>
-<div id="msg" class="msg">正在连接多维表格…</div>
-
-<div id="out" hidden>
-  <h2>订单</h2>
-  <div class="kpis" id="orderKpis"></div>
-  <h2>每日订单与销售额</h2>
-  <div class="card chart" id="orderChart"></div>
-  <h2>热销 SKU(不含已取消)</h2>
-  <div class="card" id="topSku"></div>
-
-  <h2>视频(按发布日期)</h2>
-  <div class="kpis" id="videoKpis"></div>
-  <div class="note">视频的播放、GMV 是写入表格时导出的累计值。</div>
-  <h2>达人 GMV 排行</h2>
-  <div class="card" id="topCreator"></div>
-  <h2>视频 GMV 排行</h2>
-  <div class="card" id="topVideo"></div>
-</div>
-
+<div class="tip" id="tip" role="tooltip"></div>
 <script type="module" src="app.js"></script>
 </body>
 </html>
