@@ -12,6 +12,11 @@ const fmtMoney0 = n => '$' + Math.round(n || 0).toLocaleString('en-US');
 const fmtCompact = n => { const a = Math.abs(n); return a >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : a >= 1e4 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K' : fmtInt(n); };
 const fmtPct = n => isFinite(n) ? (n * 100).toFixed(1) + '%' : '—';
 const LS = 'shop_dash_v1';
+// 飞书 SDK 的调用都加超时:宿主没响应时报错提示,而不是一直转圈
+const withTimeout = (p, ms, what) => Promise.race([Promise.resolve(p), new Promise((_, rej) => setTimeout(() => rej(new Error(what + '超时(' + ms / 1000 + ' 秒没有响应)')), ms))]);
+function fatal(text) { const m = document.getElementById('msg'); if (m) { m.hidden = false; m.className = 'msg err'; m.textContent = text; } }
+window.addEventListener('error', e => fatal('看板出错:' + (e.message || e) + '。请按 Ctrl+F5 强制刷新;仍然不行请截图发给管理员。'));
+window.addEventListener('unhandledrejection', e => fatal('看板出错:' + ((e.reason && e.reason.message) || e.reason) + '。请按 Ctrl+F5 强制刷新;仍然不行请截图发给管理员。'));
 const load = () => { try { return JSON.parse(localStorage.getItem(LS) || '{}'); } catch (e) { return {}; } };
 const save = p => { try { localStorage.setItem(LS, JSON.stringify(Object.assign(load(), p))); } catch (e) {} };
 
@@ -57,8 +62,8 @@ const cache = new Map();
 async function readTable(tableId, wanted, timeField, fromDay, onPage) {
     const hit = cache.get(tableId);
     if (hit && (hit.from === '' || hit.from <= fromDay)) return hit.rows;
-    const table = await bitable.base.getTableById(tableId);
-    const metas = await table.getFieldMetaList();
+    const table = await withTimeout(bitable.base.getTableById(tableId), 15000, '打开数据表');
+    const metas = await withTimeout(table.getFieldMetaList(), 15000, '读取字段');
     const byName = new Map(metas.map(m => [m.name, m.id]));
     // 带币种的列名(如 "Video GMV ($)")按前缀匹配
     const ids = wanted.map(w => [w, byName.get(w) || (metas.find(m => m.name.startsWith(w + ' (')) || {}).id]).filter(x => x[1]);
@@ -69,7 +74,7 @@ async function readTable(tableId, wanted, timeField, fromDay, onPage) {
         const rows = [];
         let pageToken, total = 0;
         do {
-            const res = await table.getRecordsByPage(Object.assign({ pageSize: 200, pageToken }, useFilter && filter ? { filter } : {}));
+            const res = await withTimeout(table.getRecordsByPage(Object.assign({ pageSize: 200, pageToken }, useFilter && filter ? { filter } : {})), 30000, '读取记录');
             total = res.total || total;
             for (const r of res.records) {
                 const o = {};
@@ -399,7 +404,7 @@ function markRendered() {
 }
 async function loadDashConfig() {
     try {
-        const c = await bitable.dashboard.getConfig();
+        const c = await withTimeout(bitable.dashboard.getConfig(), 8000, '读取仪表盘配置');
         const cc = (c && c.customConfig) || {};
         if (cc.srcOrder != null) pref.srcOrder = cc.srcOrder;
         if (cc.srcVideo != null) pref.srcVideo = cc.srcVideo;
@@ -413,11 +418,11 @@ async function saveDashConfig() {
     const firstId = (so && so.ids[0]) || (sv && sv.ids[0]);
     if (!firstId) { msg('请至少选择订单或视频数据', true); return; }
     try {
-        await bitable.dashboard.saveConfig({
+        await withTimeout(bitable.dashboard.saveConfig({
             // dataConditions 是仪表盘要求的数据源(用于数据变化通知);统计本身由插件自己读表计算
             dataConditions: [{ tableId: firstId, series: 'COUNTA' }],
             customConfig: { srcOrder: $('srcOrder').value, srcVideo: $('srcVideo').value, period: state.period, custom: state.custom || null }
-        });
+        }), 10000, '保存配置');
         msg('已保存到仪表盘');
     } catch (e) { msg('保存失败:' + (e && e.message || e), true); }
 }
@@ -486,7 +491,9 @@ async function refresh() {
 }
 
 async function init() {
-    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000));
+    msg('正在连接多维表格…');
+    if (isDash) setTimeout(markRendered, 12000);   // 仪表盘:无论如何 12 秒内撤掉飞书的加载动画
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000));
     try {
         tables = await Promise.race([bitable.base.getTableMetaList(), timeout]);
     } catch (e) {
@@ -497,6 +504,7 @@ async function init() {
         document.body.classList.add('dash');
         if (isDashView) document.body.classList.add('dash-view');
         else { $('saveCfg').hidden = false; $('cfgHint').hidden = false; }
+        msg('正在读取仪表盘配置…');
         await loadDashConfig();
         $('saveCfg').onclick = saveDashConfig;
         try {
@@ -506,7 +514,7 @@ async function init() {
         } catch (e) {}
     }
     try {
-        const th = await bitable.bridge.getTheme();
+        const th = await withTimeout(bitable.bridge.getTheme(), 3000, '读取主题');
         document.documentElement.dataset.theme = /dark/i.test(th) ? 'dark' : 'light';
         bitable.bridge.onThemeChange(ev => { document.documentElement.dataset.theme = /dark/i.test((ev && ev.data && ev.data.theme) || '') ? 'dark' : 'light'; renderMainChart(); });
     } catch (e) {}
@@ -514,7 +522,7 @@ async function init() {
     const onTablesChanged = async () => {
         try {
             const before = JSON.stringify([srcOpts.order, srcOpts.video].map(l => l.map(o => o.v + o.ids)));
-            tables = await bitable.base.getTableMetaList();
+            tables = await withTimeout(bitable.base.getTableMetaList(), 10000, '读取表格列表');
             rebuildSources();
             if (JSON.stringify([srcOpts.order, srcOpts.video].map(l => l.map(o => o.v + o.ids))) !== before) { msg('检测到子表有变化,已更新列表'); refresh(); }
         } catch (e) {}
