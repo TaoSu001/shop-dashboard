@@ -1,4 +1,4 @@
-// 店铺经营看板 · 飞书多维表格插件(侧边栏扩展脚本 / 仪表盘插件 两用)
+// 达人与视频看板 · 飞书多维表格插件(侧边栏扩展脚本 / 仪表盘插件 两用)
 // 用飞书官方 Base JS SDK 读当前多维表格(读的是打开表格的人自己的权限,不需要 App Secret)
 // SDK 文件放在仓库里一起发布(不依赖国外 CDN,国内打开更快)
 import { bitable } from './vendor/js-sdk/index.mjs';
@@ -91,7 +91,7 @@ async function readTable(tableId, wanted, timeField, fromDay, onPage) {
 const ORDER_COLS = ['Order ID', 'Order Status', 'Created Time', 'Quantity', 'Order Amount', 'Order Refund Amount', 'SKU Subtotal After Discount',
     'Seller SKU', 'Product Name', 'Variation', 'State', 'Buyer Username'];
 const VIDEO_COLS = ['Video ID', 'Creator name', 'Creator ID', 'Video Info', 'Time', 'Video views', 'Product Impressions', 'Product Clicks',
-    'Attributed SKU orders', 'Video-attributed GMV', 'Video-attributed items sold'];
+    'Attributed SKU orders', 'Video-attributed GMV', 'Products'];
 
 /* ======================== 数据源 ======================== */
 let tables = [];
@@ -115,67 +115,28 @@ function fillSelect(sel, opts, saved, guess) {
 }
 
 /* ======================== 统计 ======================== */
-// 订单状态分组:顺序 = 配色槽位顺序(颜色跟着状态走,不随排名变)
-const STATUS = [
-    { key: 'shipped', name: '已发货', color: 'var(--series-1)', re: /ship|transit/i },
-    { key: 'canceled', name: '已取消', color: 'var(--series-2)', re: /cancel/i },
-    { key: 'completed', name: '已完成', color: 'var(--series-3)', re: /complet|deliver/i },
-    { key: 'toship', name: '待发货', color: 'var(--series-4)', re: /to ship|awaiting|process/i, darkInk: true },
-    { key: 'pending', name: '待付款/处理中', color: 'var(--series-5)', re: /unpaid|pending|hold/i },
-    { key: 'other', name: '其他', color: 'var(--series-6)', re: /./ }
-];
-const statusOf = s => {
-    if (/cancel/i.test(s)) return 'canceled';
-    if (/to ship|awaiting|process/i.test(s)) return 'toship';
-    for (const g of STATUS) if (g.key !== 'other' && g.re.test(s)) return g.key;
-    return 'other';
-};
-const AOV_BINS = [[0, 10], [10, 20], [20, 30], [30, 40], [40, 60], [60, 100], [100, Infinity]];
 function orderStats(rows, [a, b]) {
     const orders = new Map();
-    const sku = new Map();
     let qty = 0;
     for (const r of rows) {
-        const ms = cellNum(r['Created Time']);
-        const d = dayOf(ms || null);
+        const d = dayOf(cellNum(r['Created Time']) || null);
         if (!d || d < a || d > b) continue;
         const id = cellText(r['Order ID']).trim();
         if (!id) continue;
-        const st = statusOf(cellText(r['Order Status']));
-        let o = orders.get(id);
-        if (!o) {
-            const w = wallOf(ms);
-            o = { day: d, hour: w.getUTCHours(), wd: (w.getUTCDay() + 6) % 7, st, canceled: st === 'canceled', amount: cellNum(r['Order Amount']),
-                refund: cellNum(r['Order Refund Amount']), state: cellText(r['State']).trim(), buyer: cellText(r['Buyer Username']).trim() };
-            orders.set(id, o);
-        }
-        if (!o.canceled) {
-            const q = cellNum(r['Quantity']);
-            qty += q;
-            const key = cellText(r['Seller SKU']) || cellText(r['Product Name']) || '(无 SKU)';
-            const s = sku.get(key) || { key, name: cellText(r['Product Name']), variation: cellText(r['Variation']), qty: 0, revenue: 0, orders: new Set() };
-            s.qty += q; s.revenue += cellNum(r['SKU Subtotal After Discount']); s.orders.add(id); sku.set(key, s);
-        }
+        const canceled = /cancel/i.test(cellText(r['Order Status']));
+        if (!orders.has(id)) orders.set(id, { canceled, amount: cellNum(r['Order Amount']) });
+        if (!canceled) qty += cellNum(r['Quantity']);
     }
-    const byDay = new Map(dayList([a, b]).map(d => [d, { orders: 0, sales: 0 }]));
-    const heat = Array.from({ length: 7 }, () => new Array(24).fill(0));
-    const status = new Map(STATUS.map(g => [g.key, 0]));
-    const states = new Map(), buyers = new Map();
-    const aov = AOV_BINS.map(() => 0);
-    let valid = 0, sales = 0, canceled = 0, refund = 0;
-    for (const o of orders.values()) {
-        status.set(o.st, status.get(o.st) + 1);
-        if (o.canceled) { canceled++; continue; }
-        valid++; sales += o.amount; refund += o.refund;
-        const dd = byDay.get(o.day); if (dd) { dd.orders++; dd.sales += o.amount; }
-        heat[o.wd][o.hour]++;
-        if (o.state) { const s = states.get(o.state) || { orders: 0, sales: 0 }; s.orders++; s.sales += o.amount; states.set(o.state, s); }
-        if (o.buyer) buyers.set(o.buyer, (buyers.get(o.buyer) || 0) + 1);
-        const bi = AOV_BINS.findIndex(([lo, hi]) => o.amount >= lo && o.amount < hi); if (bi >= 0) aov[bi]++;
-    }
-    const repeat = [...buyers.values()].filter(n => n >= 2).length;
-    return { all: orders.size, valid, canceled, sales, qty, refund, aov: valid ? sales / valid : NaN, cancelRate: orders.size ? canceled / orders.size : NaN,
-        byDay, heat, status, states, sku, buyers: buyers.size, repeatRate: buyers.size ? repeat / buyers.size : NaN, aovBins: aov };
+    let valid = 0, sales = 0;
+    for (const o of orders.values()) if (!o.canceled) { valid++; sales += o.amount; }
+    return { valid, sales, qty, aov: valid ? sales / valid : NaN };
+}
+// 视频的商品列:"商品名(商品ID), 商品名2(ID2)" → 取第一个商品
+function firstProduct(s) {
+    s = String(s || '').trim();
+    if (!s) return null;
+    const m = s.match(/^(.*?)\((\d{6,})\)/);
+    return m ? { name: m[1].trim(), id: m[2] } : { name: s.slice(0, 80), id: s.slice(0, 80) };
 }
 function videoStats(rows, [a, b]) {
     const vids = new Map();
@@ -187,21 +148,28 @@ function videoStats(rows, [a, b]) {
         vids.set(id, {
             id, day: d, creator: cellText(r['Creator name']), creatorId: cellText(r['Creator ID']) || cellText(r['Creator name']), info: cellText(r['Video Info']),
             views: cellNum(r['Video views']), imp: cellNum(r['Product Impressions']), clicks: cellNum(r['Product Clicks']),
-            orders: cellNum(r['Attributed SKU orders']), gmv: cellNum(r['Video-attributed GMV']), items: cellNum(r['Video-attributed items sold'])
+            orders: cellNum(r['Attributed SKU orders']), gmv: cellNum(r['Video-attributed GMV']), product: firstProduct(cellText(r['Products']))
         });
     }
     const list = [...vids.values()];
-    const creators = new Map();
-    const byDay = new Map(dayList([a, b]).map(d => [d, { posted: 0, selling: 0, gmv: 0 }]));
+    const creators = new Map(), products = new Map();
+    const byDay = new Map(dayList([a, b]).map(d => [d, { posted: 0, selling: 0, gmv: 0, orders: 0, sellers: new Set() }]));
     for (const v of list) {
-        const c = creators.get(v.creatorId) || { name: v.creator, videos: 0, selling: 0, gmv: 0, views: 0, orders: 0 };
-        c.videos++; c.gmv += v.gmv; c.views += v.views; c.orders += v.orders; if (v.orders > 0) c.selling++;
+        const c = creators.get(v.creatorId) || { id: v.creatorId, name: v.creator, videos: 0, selling: 0, gmv: 0, views: 0, imp: 0, clicks: 0, orders: 0, last: '' };
+        c.videos++; c.gmv += v.gmv; c.views += v.views; c.imp += v.imp; c.clicks += v.clicks; c.orders += v.orders; if (v.orders > 0) c.selling++; if (v.day > c.last) c.last = v.day;
         creators.set(v.creatorId, c);
-        const dd = byDay.get(v.day); if (dd) { dd.posted++; if (v.orders > 0) dd.selling++; dd.gmv += v.gmv; }
+        const dd = byDay.get(v.day);
+        if (dd) { dd.posted++; dd.gmv += v.gmv; dd.orders += v.orders; if (v.orders > 0) { dd.selling++; dd.sellers.add(v.creatorId); } }
+        if (v.product) {
+            const p = products.get(v.product.id) || { id: v.product.id, name: v.product.name, videos: 0, selling: 0, gmv: 0, orders: 0, creators: new Set() };
+            p.videos++; p.gmv += v.gmv; p.orders += v.orders; if (v.orders > 0) p.selling++; p.creators.add(v.creatorId);
+            products.set(v.product.id, p);
+        }
     }
     const sum = k => list.reduce((s, v) => s + v[k], 0);
+    const sellingCreators = [...creators.values()].filter(c => c.selling > 0).length;
     return { list, count: list.length, views: sum('views'), imp: sum('imp'), clicks: sum('clicks'), gmv: sum('gmv'), orders: sum('orders'),
-        selling: list.filter(v => v.orders > 0).length, creators, byDay };
+        selling: list.filter(v => v.orders > 0).length, creators, sellingCreators, products, byDay };
 }
 
 /* ======================== 提示框 ======================== */
@@ -225,301 +193,186 @@ function showTip(e, title, rows) {
     tip.style.left = Math.max(8, x) + 'px'; tip.style.top = Math.max(8, y) + 'px';
 }
 const hideTip = () => { tip.style.display = 'none'; };
-// 给带 data-tip 的元素绑定提示(内容存在 tipData 里,避免把数据拼进 HTML)
-function bindTips(root, tipData) {
-    root.addEventListener('pointermove', e => { const el = e.target.closest('[data-tip]'); if (!el) { hideTip(); return; } const d = tipData[+el.dataset.tip]; showTip(e, d.title, d.rows); });
-    root.addEventListener('pointerleave', hideTip);
-}
 
-/* ======================== 图表(SVG / HTML,无第三方库) ======================== */
-const svgNS = 'http://www.w3.org/2000/svg';
+/* ======================== 折线图(本期 vs 上期,同一纵轴) ======================== */
 // 4 格刻度的上限:每格是 1 / 2 / 2.5 / 5 × 10^n,保证刻度都是整齐的数
 function niceMax(v) { if (!(v > 0)) return 4; const raw = v / 4, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; let st = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; if (st < 1) st = 1; return st * 4; }
-const roundTopRect = (x, y, w, h, r) => { r = Math.min(r, w / 2, h); if (h <= 0) return ''; return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`; };
-
-// 折线(可多条、同一纵轴),十字线 + 提示
-function lineChart(body, width, { labels, series, fmt, tipTitle, height = 220 }) {
-    const L = 48, R = 14, T = 12, B = 26, H = height, W = Math.max(280, width);
-    const n = labels.length, max = niceMax(Math.max(1, ...series.flatMap(s => s.values)));
+function lineChart(body, width, { labels, series, fmt, axisFmt, tipTitle, height = 240 }) {
+    const L = 52, R = 12, T = 10, B = 26, H = height, W = Math.max(280, width);
+    const n = labels.length, max = niceMax(Math.max(0, ...series.flatMap(s => s.values)));
     const x = i => n === 1 ? (L + W - R) / 2 : L + (W - L - R) * i / (n - 1), y = v => T + (H - T - B) * (1 - v / max);
     let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img">`;
-    for (let k = 0; k <= 4; k++) { const yy = T + (H - T - B) * k / 4; s += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="${k === 4 ? 'var(--axis)' : 'var(--grid)'}" stroke-width="1"/><text x="${L - 8}" y="${yy + 4}" text-anchor="end">${fmt(max * (1 - k / 4), true)}</text>`; }
-    const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor((W - L - R) / 56))));
-    labels.forEach((lb, i) => { if (i % step === 0 || i === n - 1) s += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">${esc(lb)}</text>`; });
+    for (let k = 0; k <= 4; k++) { const yy = T + (H - T - B) * k / 4; s += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="${k === 4 ? 'var(--axis)' : 'var(--grid)'}" stroke-width="1"/><text x="${L - 10}" y="${yy + 4}" text-anchor="end">${axisFmt(max * (1 - k / 4))}</text>`; }
+    const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor((W - L - R) / 64))));
+    labels.forEach((lb, i) => { if (i % step === 0) s += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${esc(lb)}</text>`; });
     for (const se of series) {
         const pts = se.values.map((v, i) => `${x(i)},${y(v)}`).join(' ');
-        if (se.area) s += `<polygon points="${x(0)},${y(0)} ${pts} ${x(n - 1)},${y(0)}" fill="${se.color}" opacity=".10"/>`;
+        if (se.area) s += `<polygon points="${x(0)},${y(0)} ${pts} ${x(n - 1)},${y(0)}" fill="${se.color}" opacity=".08"/>`;
         s += `<polyline points="${pts}" fill="none" stroke="${se.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-        if (!se.muted && n) { const i = n - 1; s += `<circle cx="${x(i)}" cy="${y(se.values[i])}" r="4" fill="${se.color}" stroke="var(--card)" stroke-width="2"/>`; }
     }
-    s += `<line class="xh" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--axis)" stroke-width="1" visibility="hidden"/>`;
-    s += `<rect class="ov" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/></svg>`;
+    s += `<line class="xh" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--axis)" stroke-width="1" visibility="hidden"/><g class="dots"></g>`;
+    s += `<rect class="ov" x="${L}" y="0" width="${W - L - R}" height="${H - B}" fill="transparent"/></svg>`;
     body.innerHTML = s;
-    const svg = body.querySelector('svg'), xh = svg.querySelector('.xh'), ov = svg.querySelector('.ov');
+    const svg = body.querySelector('svg'), xh = svg.querySelector('.xh'), dots = svg.querySelector('.dots'), ov = svg.querySelector('.ov');
     ov.addEventListener('pointermove', e => {
         const r = svg.getBoundingClientRect(), px = (e.clientX - r.left) * W / r.width;
         const i = Math.max(0, Math.min(n - 1, Math.round((px - L) / ((W - L - R) / Math.max(1, n - 1)))));
         xh.setAttribute('x1', x(i)); xh.setAttribute('x2', x(i)); xh.setAttribute('visibility', 'visible');
-        showTip(e, tipTitle(i), series.map(se => ({ color: se.color, label: se.label ? se.label(i) : se.name, value: fmt(se.values[i]) })));
+        dots.innerHTML = series.map(se => `<circle cx="${x(i)}" cy="${y(se.values[i])}" r="4" fill="${se.color}" stroke="var(--bg)" stroke-width="2"/>`).join('');
+        showTip(e, tipTitle(i), series.slice().reverse().map(se => ({ color: se.color, label: se.label(i), value: fmt(se.values[i]) })));
     });
-    ov.addEventListener('pointerleave', () => { xh.setAttribute('visibility', 'hidden'); hideTip(); });
-}
-// 柱状(单系列)
-function columnChart(body, width, { labels, values, fmt, tipTitle, color = 'var(--series-1)', height = 200, labelEvery }) {
-    const L = 40, R = 8, T = 16, B = 26, H = height, W = Math.max(260, width);
-    const n = labels.length, max = niceMax(Math.max(1, ...values)), band = (W - L - R) / Math.max(1, n), bw = Math.min(24, band * 0.62);
-    const y = v => T + (H - T - B) * (1 - v / max);
-    let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img">`;
-    for (let k = 0; k <= 4; k++) { const yy = T + (H - T - B) * k / 4; s += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="${k === 4 ? 'var(--axis)' : 'var(--grid)'}"/><text x="${L - 8}" y="${yy + 4}" text-anchor="end">${fmt(max * (1 - k / 4), true)}</text>`; }
-    const step = labelEvery || Math.max(1, Math.ceil(n / Math.max(2, Math.floor((W - L - R) / 48))));
-    const peak = values.indexOf(Math.max(...values));
-    values.forEach((v, i) => {
-        const cx = L + band * i + band / 2;
-        s += `<rect class="hit" data-tip="${i}" x="${L + band * i}" y="${T}" width="${band}" height="${H - T - B}"/>`;
-        if (v > 0) s += `<path class="bar" d="${roundTopRect(cx - bw / 2, y(v), bw, H - B - y(v), 4)}" fill="${color}" pointer-events="none"/>`;
-        if (i === peak && v > 0) s += `<text class="val" x="${cx}" y="${y(v) - 5}" text-anchor="middle">${fmt(v)}</text>`;
-        if (i % step === 0) s += `<text x="${cx}" y="${H - 8}" text-anchor="middle">${esc(labels[i])}</text>`;
-    });
-    body.innerHTML = s + '</svg>';
-    bindTips(body, values.map((v, i) => ({ title: tipTitle(i), rows: [{ label: '', value: fmt(v) }] })));
-}
-// 横向条形排行(HTML,文字清晰、自动换行)
-function barList(body, rows, { fmt, color = 'var(--series-1)', sub }) {
-    if (!rows.length) { body.innerHTML = '<div class="empty">这段时间没有数据</div>'; return; }
-    const max = Math.max(...rows.map(r => r.value), 1);
-    body.innerHTML = `<div style="display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.6fr) auto;gap:8px 10px;align-items:center">${rows.map((r, i) => `
-      <div data-tip="${i}" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(r.label)}">${r.href ? `<a href="${esc(r.href)}" target="_blank" rel="noopener">${esc(r.label)}</a>` : esc(r.label)}${r.sub ? `<div class="s" style="color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis">${esc(r.sub)}</div>` : ''}</div>
-      <div data-tip="${i}" style="height:24px;display:flex;align-items:center"><div style="height:12px;width:${Math.max(0.6, r.value / max * 100).toFixed(2)}%;background:${color};border-radius:0 4px 4px 0"></div></div>
-      <div data-tip="${i}" style="font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;text-align:right">${fmt(r.value)}</div>`).join('')}</div>`;
-    bindTips(body, rows.map(r => ({ title: r.label, rows: r.tip || [{ label: '', value: fmt(r.value) }] })));
-}
-// 周 × 小时 热力图(单色由浅到深)
-function heatmap(body, width, heat) {
-    const W = Math.max(300, width), L = 36, T = 4, B = 22, R = 4;
-    const cw = (W - L - R) / 24, ch = Math.min(26, Math.max(18, cw)), H = T + ch * 7 + B;
-    const max = Math.max(1, ...heat.flat());
-    const bin = v => v <= 0 ? 0 : Math.min(5, Math.ceil(v / max * 5));
-    const tipData = [];
-    let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img">`;
-    heat.forEach((row, d) => {
-        s += `<text x="${L - 6}" y="${T + ch * d + ch / 2 + 4}" text-anchor="end">${WD[d]}</text>`;
-        row.forEach((v, h) => {
-            const b = bin(v);
-            tipData.push({ title: `${WD[d]} ${pad(h)}:00–${pad(h)}:59`, rows: [{ label: '有效订单', value: fmtInt(v) }] });
-            s += `<rect data-tip="${tipData.length - 1}" x="${L + cw * h + 1}" y="${T + ch * d + 1}" width="${cw - 2}" height="${ch - 2}" rx="3" fill="${b ? `var(--seq-${b})` : 'var(--fill-2)'}"/>`;
-        });
-    });
-    for (let h = 0; h < 24; h += 3) s += `<text x="${L + cw * h + cw / 2}" y="${H - 6}" text-anchor="middle">${h}时</text>`;
-    body.innerHTML = s + '</svg>' + `<div class="legend" style="margin:6px 0 0">少 ${[1, 2, 3, 4, 5].map(b => `<i style="background:var(--seq-${b});margin:0"></i>`).join('')} 多 <span style="margin-left:8px">最多 ${fmtInt(max)} 单/小时</span></div>`;
-    bindTips(body, tipData);
-}
-// 一条分段条:整体中的各部分
-function segBar(body, width, parts, fmt) {
-    const total = parts.reduce((s, p) => s + p.value, 0);
-    if (!total) { body.innerHTML = '<div class="empty">这段时间没有订单</div>'; return; }
-    const shown = parts.filter(p => p.value > 0);
-    const avail = Math.max(200, width) - 2 * (shown.length - 1);
-    body.innerHTML = `<div class="segbar">${shown.map((p, i) => {
-        const w = p.value / total, px = w * avail, txt = (w * 100).toFixed(0) + '%';
-        return `<div data-tip="${i}" class="${p.darkInk ? 'dark-ink' : ''}" style="flex:${p.value} 1 0;background:${p.color}">${px >= 40 ? txt : ''}</div>`;
-    }).join('')}</div>
-    <table><tbody>${parts.map(p => `<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${p.color};margin-right:8px;vertical-align:-1px"></span>${esc(p.name)}</td><td class="n">${fmt(p.value)}</td><td class="n" style="color:var(--muted)">${fmtPct(p.value / total)}</td></tr>`).join('')}</tbody></table>`;
-    bindTips(body.querySelector('.segbar'), shown.map(p => ({ title: p.name, rows: [{ label: '订单', value: fmt(p.value) }, { label: '占比', value: fmtPct(p.value / total) }] })));
-}
-function sparkline(values, width = 220, height = 44) {
-    if (values.length < 2) return '';
-    const max = Math.max(...values, 1), min = 0;
-    const x = i => 2 + (width - 4) * i / (values.length - 1), y = v => 4 + (height - 8) * (1 - (v - min) / (max - min || 1));
-    const pts = values.map((v, i) => `${x(i)},${y(v)}`).join(' ');
-    return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none" aria-hidden="true"><polygon points="${x(0)},${height} ${pts} ${x(values.length - 1)},${height}" fill="var(--series-1)" opacity=".10"/><polyline points="${pts}" fill="none" stroke="var(--series-1)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
+    ov.addEventListener('pointerleave', () => { xh.setAttribute('visibility', 'hidden'); dots.innerHTML = ''; hideTip(); });
 }
 
-/* ======================== 卡片 ======================== */
-const cards = new Map();   // key -> spec { title, sub, legend, draw(body,width), table() }
-const cardView = new Map(); // key -> 'chart' | 'table'
-function setCard(key, spec) { cards.set(key, spec); paintCard(key); }
-function paintCard(key) {
-    const el = document.querySelector(`[data-card="${key}"]`), spec = cards.get(key);
-    if (!el || !spec) return;
-    const view = cardView.get(key) || 'chart';
-    el.innerHTML = `<div class="card-h"><div><h3>${esc(spec.title)}</h3>${spec.sub ? `<p>${esc(spec.sub)}</p>` : ''}</div>${spec.table ? `<button class="tbtn" data-toggle="${key}">${view === 'chart' ? '数据表' : '图表'}</button>` : ''}</div>
-      ${view === 'chart' && spec.legend ? `<div class="legend">${spec.legend.map(l => `<span><i class="${l.line ? 'line' : ''}" style="background:${l.color}"></i>${esc(l.name)}</span>`).join('')}</div>` : ''}
-      <div class="chart"></div>`;
-    const body = el.querySelector('.chart');
-    if (view === 'table' && spec.table) {
-        const t = spec.table();
-        body.innerHTML = `<div class="tablewrap"><table><thead><tr>${t.head.map((h, i) => `<th class="${t.num && t.num.includes(i) ? 'n' : ''}">${esc(h)}</th>`).join('')}</tr></thead><tbody>${t.rows.map(r => `<tr>${r.map((c, i) => `<td class="${t.num && t.num.includes(i) ? 'n' : ''}">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-    } else spec.draw(body, body.clientWidth || el.clientWidth - 32);
+/* ======================== 可排序表格 ======================== */
+const tblState = new Map();   // id -> { key, all }
+function renderTable(host, id, { cols, rows, defaultKey, limit = 20, empty = '这段时间没有数据' }) {
+    const st = tblState.get(id) || { key: defaultKey, all: false };
+    tblState.set(id, st);
+    if (!rows.length) { host.innerHTML = `<div class="empty">${empty}</div>`; return; }
+    const col = cols.find(c => c.key === st.key) || cols.find(c => c.key === defaultKey);
+    const sorted = rows.slice().sort((a, b) => (col.val(b) - col.val(a)) || 0);
+    const shown = st.all ? sorted : sorted.slice(0, limit);
+    const maxOf = {};
+    for (const c of cols) if (c.bar) maxOf[c.key] = Math.max(...rows.map(r => c.val(r)), 1e-9);
+    host.innerHTML = `<table class="tbl"><thead><tr><th class="rk">#</th>${cols.map(c => `<th class="${c.num ? 'n' : ''} ${c.val ? 's' : ''} ${c.key === col.key ? 'sorted' : ''} ${c.cls || ''}" ${c.val ? `data-k="${c.key}" tabindex="0"` : ''}>${esc(c.label)}</th>`).join('')}</tr></thead>
+      <tbody>${shown.map((r, i) => `<tr><td class="rk">${i + 1}</td>${cols.map(c => {
+        if (c.html) return `<td class="who ${c.cls || ''}">${c.html(r)}</td>`;
+        const v = c.val(r), txt = c.fmt(v, r);
+        if (c.bar) return `<td class="n ${c.cls || ''}"><span class="bar">${esc(txt)}<span class="track"><i style="width:${Math.max(0, Math.min(100, v / maxOf[c.key] * 100)).toFixed(1)}%"></i></span></span></td>`;
+        return `<td class="n ${c.cls || ''}">${c.rich ? txt : esc(txt)}</td>`;
+    }).join('')}</tr>`).join('')}</tbody></table>
+      ${rows.length > limit ? `<button class="link more" data-more="${id}">${st.all ? '收起' : `显示全部 ${fmtInt(rows.length)} 条`}</button>` : ''}`;
+    const rerender = () => renderTable(host, id, { cols, rows, defaultKey, limit, empty });
+    host.querySelectorAll('th[data-k]').forEach(th => {
+        const go = () => { st.key = th.dataset.k; rerender(); };
+        th.onclick = go; th.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+    });
+    const more = host.querySelector('[data-more]');
+    if (more) more.onclick = () => { st.all = !st.all; rerender(); };
 }
-document.addEventListener('click', e => {
-    const b = e.target.closest('[data-toggle]'); if (!b) return;
-    const k = b.dataset.toggle; cardView.set(k, (cardView.get(k) || 'chart') === 'chart' ? 'table' : 'chart'); paintCard(k);
-});
-let resizeT, lastW = 0;
-new ResizeObserver(() => { const w = $('out').clientWidth; if (Math.abs(w - lastW) < 8) return; lastW = w; clearTimeout(resizeT); resizeT = setTimeout(() => cards.forEach((_, k) => paintCard(k)), 120); }).observe($('out'));
 
-/* ======================== 指标卡 ======================== */
-// 变化:up/down 按「这个指标涨了是好事吗」上色,并带 ▲▼ 符号
-function deltaHtml(cur, prev, { lowerIsBetter = false, pp = false } = {}) {
-    if (!isFinite(cur) || !isFinite(prev) || (!pp && prev === 0)) return '<div class="d">上期无数据</div>';
-    const diff = pp ? (cur - prev) * 100 : (cur - prev) / Math.abs(prev) * 100;
-    if (Math.abs(diff) < 0.05) return '<div class="d">与上期持平</div>';
-    const good = lowerIsBetter ? diff < 0 : diff > 0;
-    return `<div class="d"><span class="${good ? 'up' : 'down'}">${diff > 0 ? '▲' : '▼'} ${Math.abs(diff).toFixed(1)}${pp ? ' 个百分点' : '%'}</span> 较上期</div>`;
+/* ======================== 指标与大图 ======================== */
+const pctChange = (a, b) => (isFinite(a) && isFinite(b) && b !== 0) ? (a - b) / Math.abs(b) : NaN;
+function deltaText(cur, prev) {
+    const r = pctChange(cur, prev);
+    if (!isFinite(r)) return '<span>上期无数据</span>';
+    if (Math.abs(r) < 0.0005) return '<span>与上期持平</span>';
+    return `<span class="${r > 0 ? 'up' : 'down'}">${r > 0 ? '▲' : '▼'} ${Math.abs(r * 100).toFixed(1)}%</span> 较上期`;
 }
-const tile = (k, v, d, extra = '') => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>${extra ? `<div class="sub">${extra}</div>` : ''}${d}</div>`;
-function renderKpis(oc, op, vc, vp, range) {
+const METRICS = [
+    { key: 'gmv', label: '视频 GMV', total: s => s.gmv, day: d => d.gmv, fmt: fmtMoney0, axis: v => '$' + fmtCompact(v), sub: s => `${fmtInt(s.orders)} 笔订单` },
+    { key: 'selling', label: '出单视频', total: s => s.selling, day: d => d.selling, fmt: fmtInt, axis: fmtCompact, sub: s => `出单率 ${fmtPct(s.count ? s.selling / s.count : NaN)}` },
+    { key: 'posted', label: '发布视频', total: s => s.count, day: d => d.posted, fmt: fmtInt, axis: fmtCompact, sub: s => `${fmtInt(s.creators.size)} 位达人发布` },
+    { key: 'sellers', label: '出单达人', total: s => s.sellingCreators, day: d => d.sellers.size, fmt: fmtInt, axis: fmtCompact, sub: s => `占发布达人 ${fmtPct(s.creators.size ? s.sellingCreators / s.creators.size : NaN)}` },
+    { key: 'orders', label: '视频订单', total: s => s.orders, day: d => d.orders, fmt: fmtInt, axis: fmtCompact, sub: s => `转化率 ${fmtPct(s.clicks ? s.orders / s.clicks : NaN)}` }
+];
+let view = null;   // 最近一次统计结果,切换指标 / 改变宽度时重画
+function renderMetrics() {
+    const { vc, vp } = view;
+    const cur = state.metric && METRICS.find(m => m.key === state.metric) ? state.metric : 'gmv';
+    $('metrics').innerHTML = METRICS.map(m => `<button class="metric ${m.key === cur ? 'on' : ''}" role="tab" aria-selected="${m.key === cur}" data-m="${m.key}">
+        <div class="k">${m.label}</div><div class="v">${m.fmt(m.total(vc))}</div><div class="d">${deltaText(m.total(vc), m.total(vp))}</div><div class="d">${esc(m.sub(vc))}</div></button>`).join('');
+    renderMainChart();
+}
+function renderMainChart() {
+    if (!view) return;
+    const { vc, vp, range, prev } = view;
+    const m = METRICS.find(x => x.key === state.metric) || METRICS[0];
+    const ds = dayList(range), pds = dayList(prev);
+    $('legend').innerHTML = `<span><i style="background:var(--accent)"></i>${m.label} · 本期</span><span><i style="background:var(--prev)"></i>上期 ${md(prev[0])}–${md(prev[1])}</span>`;
+    const el = $('mainChart');
+    lineChart(el, el.clientWidth, {
+        labels: ds.map(md), fmt: m.fmt, axisFmt: m.axis, tipTitle: i => `${ds[i]} ${WD[(new Date(ds[i] + 'T00:00:00Z').getUTCDay() + 6) % 7]}`,
+        series: [
+            { color: 'var(--prev)', values: pds.map(d => { const v = vp.byDay.get(d); return v ? m.day(v) : 0; }), label: i => `上期 ${md(pds[i] || '')}` },
+            { color: 'var(--accent)', area: true, values: ds.map(d => m.day(vc.byDay.get(d))), label: () => '本期' }
+        ]
+    });
+}
+
+/* ======================== 洞察(最多 4 条,围绕达人和视频) ======================== */
+function renderInsights(vc, vp, oc) {
+    const out = [];
+    if (vc.count) {
+        const dg = pctChange(vc.gmv, vp.gmv), ds = pctChange(vc.selling, vp.selling);
+        const perCur = vc.selling ? vc.gmv / vc.selling : 0, perPrev = vp.selling ? vp.gmv / vp.selling : 0, dp = pctChange(perCur, perPrev);
+        if (isFinite(dg)) out.push(`视频 GMV ${dg >= 0 ? '增长' : '下降'} <b>${fmtPct(Math.abs(dg))}</b>。${isFinite(ds) && isFinite(dp) ? (Math.abs(ds) >= Math.abs(dp)
+            ? `主要因为出单视频${ds >= 0 ? '多了' : '少了'} ${fmtPct(Math.abs(ds))}` : `主要因为每条出单视频的 GMV ${dp >= 0 ? '提高' : '下降'}了 ${fmtPct(Math.abs(dp))}(${fmtMoney0(perCur)}/条)`) + '。' : ''}`);
+        else out.push(`这段时间发布 <b>${fmtInt(vc.count)}</b> 条视频,带来 <b>${fmtMoney0(vc.gmv)}</b> GMV。`);
+        const cs = [...vc.creators.values()].sort((a, b) => b.gmv - a.gmv);
+        const newOnes = cs.filter(c => !vp.creators.has(c.id));
+        if (vc.gmv > 0) out.push(`前 3 位达人贡献 <b>${fmtPct(cs.slice(0, 3).reduce((s, c) => s + c.gmv, 0) / vc.gmv)}</b> 的视频 GMV,第一名是 <b>${esc(cs[0].name)}</b>(${fmtMoney0(cs[0].gmv)})。${newOnes.length ? `新达人 ${newOnes.length} 位,其中 ${newOnes.filter(c => c.selling > 0).length} 位已出单。` : ''}`);
+        const hot = vc.list.filter(v => v.orders === 0).sort((a, b) => b.views - a.views);
+        const viewP75 = vc.list.map(v => v.views).sort((a, b) => a - b)[Math.floor(vc.list.length * 0.75)] || 0;
+        const missed = hot.filter(v => v.views >= viewP75 && v.views > 0);
+        out.push(`出单率 <b>${fmtPct(vc.selling / vc.count)}</b>,商品点击率 ${fmtPct(vc.imp ? vc.clicks / vc.imp : NaN)},点击到下单 ${fmtPct(vc.clicks ? vc.orders / vc.clicks : NaN)}。${missed.length ? `有 <b>${missed.length}</b> 条播放量排在前 25% 的视频还没出单,值得看看商品挂车和价格。` : ''}`);
+        const ps = [...vc.products.values()].sort((a, b) => b.gmv - a.gmv);
+        if (ps.length && ps[0].gmv > 0) out.push(`视频带货最好的商品是 <b>${esc(ps[0].name.slice(0, 40))}</b>,${fmtInt(ps[0].creators.size)} 位达人的 ${fmtInt(ps[0].videos)} 条视频带来 ${fmtMoney0(ps[0].gmv)}${vc.gmv ? `,占视频 GMV 的 ${fmtPct(ps[0].gmv / vc.gmv)}` : ''}。`);
+    } else out.push('这段时间没有发布的视频。');
+    $('insights').innerHTML = out.slice(0, 4).map(t => `<li>${t}</li>`).join('');
+}
+
+/* ======================== 三个分区 ======================== */
+function renderCreators(vc, vp) {
+    const rows = [...vc.creators.values()];
+    renderTable($('creators'), 'creators', {
+        defaultKey: 'gmv', empty: '这段时间没有达人发布视频',
+        rows,
+        cols: [
+            { key: 'name', label: '达人', html: c => `<a href="https://www.tiktok.com/@${encodeURIComponent(c.name)}" target="_blank" rel="noopener">${esc(c.name)}</a>${vp.creators.has(c.id) ? '' : '<span class="badge">新</span>'}<div class="meta">最近发布 ${md(c.last)}</div>` },
+            { key: 'videos', label: '视频', num: true, val: c => c.videos, fmt: fmtInt },
+            { key: 'selling', label: '出单视频', num: true, val: c => c.selling, fmt: fmtInt },
+            { key: 'rate', label: '出单率', num: true, val: c => c.videos ? c.selling / c.videos : 0, fmt: fmtPct, bar: true, cls: 'hide-sm' },
+            { key: 'views', label: '播放', num: true, val: c => c.views, fmt: fmtCompact, cls: 'hide-sm' },
+            { key: 'ctr', label: '点击率', num: true, val: c => c.imp ? c.clicks / c.imp : 0, fmt: fmtPct, cls: 'hide-sm' },
+            { key: 'orders', label: '订单', num: true, val: c => c.orders, fmt: fmtInt },
+            { key: 'gmv', label: 'GMV', num: true, val: c => c.gmv, fmt: fmtMoney0, bar: true },
+            { key: 'chg', label: '较上期', num: true, rich: true, val: c => { const p = vp.creators.get(c.id); return p ? c.gmv - p.gmv : c.gmv; },
+                fmt: (v, c) => { const p = vp.creators.get(c.id); if (!p) return '<span style="color:var(--muted)">—</span>'; const d = c.gmv - p.gmv; return Math.abs(d) < 0.5 ? '<span style="color:var(--muted)">持平</span>' : `<span class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : '−'}${fmtMoney0(Math.abs(d))}</span>`; } }
+        ]
+    });
+}
+function renderVideos(vc) {
+    renderTable($('videos'), 'videos', {
+        defaultKey: 'gmv', empty: '这段时间没有发布的视频',
+        rows: vc.list,
+        cols: [
+            { key: 'v', label: '视频', html: v => `<a href="https://www.tiktok.com/@${encodeURIComponent(v.creator)}/video/${esc(v.id)}" target="_blank" rel="noopener">${esc(v.creator)}</a> <span style="color:var(--muted);font-size:12px">${md(v.day)}</span><div class="meta">${esc((v.info || '').replace(/\s+/g, ' ').slice(0, 90))}</div>` },
+            { key: 'views', label: '播放', num: true, val: v => v.views, fmt: fmtCompact },
+            { key: 'ctr', label: '点击率', num: true, val: v => v.imp ? v.clicks / v.imp : 0, fmt: fmtPct, cls: 'hide-sm' },
+            { key: 'cvr', label: '下单率', num: true, val: v => v.clicks ? v.orders / v.clicks : 0, fmt: fmtPct, cls: 'hide-sm' },
+            { key: 'orders', label: '订单', num: true, val: v => v.orders, fmt: fmtInt },
+            { key: 'gmv', label: 'GMV', num: true, val: v => v.gmv, fmt: fmtMoney0, bar: true }
+        ]
+    });
+}
+function renderOrderSide(vc, oc, op) {
     const parts = [];
     if (oc) {
-        const daily = dayList(range).map(d => oc.byDay.get(d).sales);
-        parts.push(`<div class="tile hero"><div class="k">销售额(不含取消)</div><div class="v">${fmtMoney0(oc.sales)}</div>${deltaHtml(oc.sales, op.sales)}<div class="spark">${sparkline(daily)}</div></div>`);
-        parts.push(tile('有效订单', fmtInt(oc.valid), deltaHtml(oc.valid, op.valid)));
-        parts.push(tile('客单价', isFinite(oc.aov) ? fmtMoney(oc.aov) : '—', deltaHtml(oc.aov, op.aov)));
-        parts.push(tile('售出件数', fmtInt(oc.qty), deltaHtml(oc.qty, op.qty)));
-        parts.push(tile('取消率', fmtPct(oc.cancelRate), deltaHtml(oc.cancelRate, op.cancelRate, { lowerIsBetter: true, pp: true }), `${fmtInt(oc.canceled)} 单已取消`));
-        parts.push(tile('复购买家占比', fmtPct(oc.repeatRate), deltaHtml(oc.repeatRate, op.repeatRate, { pp: true }), `共 ${fmtInt(oc.buyers)} 位买家`));
-        if (oc.refund > 0 || op.refund > 0) parts.push(tile('退款金额', fmtMoney0(oc.refund), deltaHtml(oc.refund, op.refund, { lowerIsBetter: true })));
+        parts.push(`<div class="stat"><div class="k">店铺订单</div><div class="v">${fmtInt(oc.valid)}<small>${deltaText(oc.valid, op.valid)}</small></div></div>`);
+        parts.push(`<div class="stat"><div class="k">店铺销售额</div><div class="v">${fmtMoney0(oc.sales)}<small>${deltaText(oc.sales, op.sales)}</small></div></div>`);
+        parts.push(`<div class="stat"><div class="k">客单价</div><div class="v">${isFinite(oc.aov) ? fmtMoney(oc.aov) : '—'}</div></div>`);
+        if (vc && oc.sales > 0) parts.push(`<div class="stat"><div class="k">视频 GMV 相当于销售额的</div><div class="v">${fmtPct(vc.gmv / oc.sales)}<small>口径不同,仅供参考</small></div></div>`);
     }
-    if (vc) {
-        parts.push(tile('视频归因 GMV', fmtMoney0(vc.gmv), deltaHtml(vc.gmv, vp.gmv)));
-        parts.push(tile('发布视频', fmtInt(vc.count), deltaHtml(vc.count, vp.count), `${fmtInt(vc.creators.size)} 位达人`));
-        parts.push(tile('出单视频占比', fmtPct(vc.count ? vc.selling / vc.count : NaN), deltaHtml(vc.count ? vc.selling / vc.count : NaN, vp.count ? vp.selling / vp.count : NaN, { pp: true }), `${fmtInt(vc.selling)} 条出单`));
-    }
-    $('kpis').innerHTML = parts.join('') || '<div class="empty">没有选择数据</div>';
-}
-
-/* ======================== 数据洞察 ======================== */
-function insights(oc, op, vc, vp, range) {
-    const out = [];
-    const pct = (a, b) => b ? (a - b) / Math.abs(b) : NaN;
-    if (oc && oc.valid) {
-        const ds = pct(oc.sales, op.sales), dor = pct(oc.valid, op.valid), da = pct(oc.aov, op.aov);
-        if (isFinite(ds)) {
-            const driver = Math.abs(dor) >= Math.abs(da) ? `主要来自订单数${dor >= 0 ? '增加' : '减少'} ${fmtPct(Math.abs(dor))}` : `主要来自客单价${da >= 0 ? '提高' : '下降'} ${fmtPct(Math.abs(da))}`;
-            out.push({ tone: ds >= 0 ? 'up' : 'down', html: `销售额 <b>${fmtMoney0(oc.sales)}</b>,较上期${ds >= 0 ? '增长' : '下降'} <b>${fmtPct(Math.abs(ds))}</b>,${driver}(订单 ${dor >= 0 ? '+' : '−'}${fmtPct(Math.abs(dor))},客单价 ${da >= 0 ? '+' : '−'}${fmtPct(Math.abs(da))})。` });
-        }
-        const dd = [...oc.byDay.entries()].filter(([, v]) => v.orders > 0);
-        if (dd.length > 1) {
-            const best = dd.reduce((a, b) => b[1].sales > a[1].sales ? b : a), worst = dd.reduce((a, b) => b[1].sales < a[1].sales ? b : a);
-            out.push({ tone: 'info', html: `销售额最高的一天是 <b>${md(best[0])}(${WD[(new Date(best[0] + 'T00:00:00Z').getUTCDay() + 6) % 7]})</b> ${fmtMoney0(best[1].sales)},最低是 ${md(worst[0])} ${fmtMoney0(worst[1].sales)}。` });
-        }
-        let pk = [0, 0, 0];
-        oc.heat.forEach((r, d) => r.forEach((v, h) => { if (v > pk[2]) pk = [d, h, v]; }));
-        const byHour = new Array(24).fill(0); oc.heat.forEach(r => r.forEach((v, h) => byHour[h] += v));
-        let bestWin = [0, 0]; for (let h = 0; h < 24; h++) { const s = byHour[h] + byHour[(h + 1) % 24] + byHour[(h + 2) % 24]; if (s > bestWin[1]) bestWin = [h, s]; }
-        out.push({ tone: 'info', html: `下单最集中在 <b>${pad(bestWin[0])}:00–${pad((bestWin[0] + 3) % 24)}:00</b>(店铺当地时间),这 3 小时占全部订单的 <b>${fmtPct(bestWin[1] / oc.valid)}</b>;单个时段最高是 ${WD[pk[0]]} ${pad(pk[1])} 点。适合安排直播、投放或达人发布。` });
-        const skus = [...oc.sku.values()].sort((a, b) => b.revenue - a.revenue || b.qty - a.qty);
-        if (skus.length) {
-            const totalRev = skus.reduce((s, x) => s + x.revenue, 0) || 1, top = skus[0];
-            const prevSku = op.sku;
-            let grow = null;
-            for (const s of skus.slice(0, 20)) { const p = prevSku.get(s.key); const g = p && p.qty >= 5 ? (s.qty - p.qty) / p.qty : null; if (g != null && (!grow || g > grow.g)) grow = { s, g }; }
-            out.push({ tone: 'info', html: `<b>${esc(top.key)}</b> 卖得最好,贡献 <b>${fmtPct(top.revenue / totalRev)}</b> 的 SKU 销售额(${fmtInt(top.qty)} 件)${skus.length >= 3 ? `;前 3 个 SKU 合计占 ${fmtPct(skus.slice(0, 3).reduce((s, x) => s + x.revenue, 0) / totalRev)}` : ''}。${grow && grow.g > 0.2 ? `增长最快的是 <b>${esc(grow.s.key)}</b>,件数较上期 +${fmtPct(grow.g)}。` : ''}` });
-        }
-        if (isFinite(oc.cancelRate)) {
-            const up = isFinite(op.cancelRate) && oc.cancelRate - op.cancelRate > 0.01;
-            if (oc.cancelRate >= 0.05 || up) out.push({ tone: 'warn', html: `取消率 <b>${fmtPct(oc.cancelRate)}</b>${isFinite(op.cancelRate) ? `(上期 ${fmtPct(op.cancelRate)})` : ''},${up ? '比上期升高,' : ''}建议检查库存、发货时效和价格设置。` });
-        }
-        if (isFinite(oc.repeatRate) && oc.buyers >= 20) out.push({ tone: 'info', html: `${fmtInt(oc.buyers)} 位买家中有 <b>${fmtPct(oc.repeatRate)}</b> 在这段时间下了 2 单或以上。` });
-        const st = [...oc.states.entries()].sort((a, b) => b[1].orders - a[1].orders);
-        if (st.length >= 3) out.push({ tone: 'info', html: `订单最多的州是 <b>${esc(st[0][0])}</b>、${esc(st[1][0])}、${esc(st[2][0])},合计占 <b>${fmtPct((st[0][1].orders + st[1][1].orders + st[2][1].orders) / oc.valid)}</b>。` });
-    }
-    if (vc && vc.count) {
-        const sellRate = vc.selling / vc.count;
-        const cs = [...vc.creators.values()].sort((a, b) => b.gmv - a.gmv);
-        const top3 = cs.slice(0, 3).reduce((s, c) => s + c.gmv, 0);
-        const newC = [...vc.creators.keys()].filter(k => !vp.creators.has(k)).length;
-        out.push({ tone: sellRate >= 0.3 ? 'up' : 'info', html: `发布 <b>${fmtInt(vc.count)}</b> 条视频,其中 <b>${fmtPct(sellRate)}</b> 带来了订单;${vc.gmv > 0 ? `前 3 位达人贡献了 <b>${fmtPct(top3 / vc.gmv)}</b> 的视频 GMV,` : ''}${newC ? `有 <b>${fmtInt(newC)}</b> 位达人是上期没有发过视频的新面孔。` : '发视频的都是上期的老达人。'}` });
-        if (vc.views > 0) out.push({ tone: 'info', html: `视频转化:${fmtCompact(vc.views)} 次播放 → ${fmtCompact(vc.imp)} 次商品曝光 → ${fmtCompact(vc.clicks)} 次点击(点击率 <b>${fmtPct(vc.imp ? vc.clicks / vc.imp : NaN)}</b>)→ ${fmtInt(vc.orders)} 笔订单(转化率 <b>${fmtPct(vc.clicks ? vc.orders / vc.clicks : NaN)}</b>)。` });
-        if (oc && oc.sales > 0 && vc.gmv > 0) out.push({ tone: 'info', html: `这段时间发布的视频带来的 GMV 相当于店铺销售额的 <b>${fmtPct(vc.gmv / oc.sales)}</b>(视频 GMV 为写入时的累计值,口径不完全相同,仅供参考)。` });
-    }
-    $('insights').innerHTML = out.length ? out.map(i => `<li><span class="ic ${i.tone}" aria-hidden="true">${i.tone === 'up' ? '↑' : i.tone === 'down' ? '↓' : i.tone === 'warn' ? '!' : 'i'}</span><div>${i.html}</div></li>`).join('') : '<li><span class="ic info">i</span><div>这段时间没有足够的数据。</div></li>';
-}
-
-/* ======================== 渲染全部 ======================== */
-function renderOrders(oc, op, range, prev) {
-    const ds = dayList(range), pds = dayList(prev);
-    setCard('sales', {
-        title: '每日销售额', sub: '与上一期同位置的日期对比',
-        legend: [{ name: `本期 ${md(range[0])}–${md(range[1])}`, color: 'var(--series-1)', line: true }, { name: `上期 ${md(prev[0])}–${md(prev[1])}`, color: 'var(--prev)', line: true }],
-        draw: (b, w) => lineChart(b, w, {
-            labels: ds.map(md), fmt: (v, axis) => axis ? '$' + fmtCompact(v) : fmtMoney0(v), tipTitle: i => `${md(ds[i])} ${WD[(new Date(ds[i] + 'T00:00:00Z').getUTCDay() + 6) % 7]}`,
-            series: [
-                { name: '上期', color: 'var(--prev)', muted: true, values: pds.map(d => (op.byDay.get(d) || {}).sales || 0), label: i => `上期 ${md(pds[i] || '')}` },
-                { name: '本期', color: 'var(--series-1)', area: true, values: ds.map(d => oc.byDay.get(d).sales), label: () => '本期' }
-            ]
-        }),
-        table: () => ({ head: ['日期', '本期销售额', '本期订单', '上期日期', '上期销售额'], num: [1, 2, 4], rows: ds.map((d, i) => [d, fmtMoney(oc.byDay.get(d).sales), fmtInt(oc.byDay.get(d).orders), pds[i] || '', fmtMoney((op.byDay.get(pds[i]) || {}).sales || 0)]) })
-    });
-    setCard('orders', {
-        title: '每日有效订单', sub: '已标出最高的一天',
-        draw: (b, w) => columnChart(b, w, { labels: ds.map(md), values: ds.map(d => oc.byDay.get(d).orders), fmt: (v, axis) => axis ? fmtCompact(v) : fmtInt(v) + ' 单', tipTitle: i => ds[i] }),
-        table: () => ({ head: ['日期', '有效订单', '销售额'], num: [1, 2], rows: ds.map(d => [d, fmtInt(oc.byDay.get(d).orders), fmtMoney(oc.byDay.get(d).sales)]) })
-    });
-    setCard('status', {
-        title: '订单状态', sub: `共 ${fmtInt(oc.all)} 单(含已取消)`,
-        draw: (b, w) => segBar(b, w, STATUS.map(g => ({ name: g.name, color: g.color, value: oc.status.get(g.key), darkInk: g.darkInk })), v => fmtInt(v) + ' 单')
-    });
-    setCard('heat', {
-        title: '下单时段分布', sub: '星期 × 小时,店铺当地时间,颜色越深订单越多',
-        draw: (b, w) => heatmap(b, w, oc.heat),
-        table: () => ({ head: ['星期', ...Array.from({ length: 24 }, (_, h) => h + '时')], num: Array.from({ length: 24 }, (_, i) => i + 1), rows: oc.heat.map((r, d) => [WD[d], ...r.map(fmtInt)]) })
-    });
-    const skus = [...oc.sku.values()].sort((a, b) => b.revenue - a.revenue || b.qty - a.qty);
-    setCard('sku', {
-        title: '热销 SKU', sub: '按 SKU 销售额(折后)排序,前 10',
-        draw: b => barList(b, skus.slice(0, 10).map(s => ({ label: s.key, sub: [s.name, s.variation].filter(Boolean).join(' · ').slice(0, 70), value: s.revenue,
-            tip: [{ label: '销售额', value: fmtMoney(s.revenue) }, { label: '件数', value: fmtInt(s.qty) }, { label: '订单', value: fmtInt(s.orders.size) }, { label: '上期件数', value: fmtInt((op.sku.get(s.key) || {}).qty || 0) }] })), { fmt: fmtMoney0 }),
-        table: () => ({ head: ['SKU', '商品', '销售额', '件数', '订单', '上期件数'], num: [2, 3, 4, 5], rows: skus.map(s => [s.key, s.name.slice(0, 60), fmtMoney(s.revenue), fmtInt(s.qty), fmtInt(s.orders.size), fmtInt((op.sku.get(s.key) || {}).qty || 0)]) })
-    });
-    const sts = [...oc.states.entries()].sort((a, b) => b[1].orders - a[1].orders);
-    setCard('state', {
-        title: '订单地区', sub: '按州 / 省,前 10',
-        draw: b => barList(b, sts.slice(0, 10).map(([k, v]) => ({ label: k, value: v.orders, tip: [{ label: '订单', value: fmtInt(v.orders) }, { label: '销售额', value: fmtMoney0(v.sales) }, { label: '占比', value: fmtPct(v.orders / oc.valid) }] })), { fmt: v => fmtInt(v) }),
-        table: () => ({ head: ['州 / 省', '订单', '销售额', '占比'], num: [1, 2, 3], rows: sts.map(([k, v]) => [k, fmtInt(v.orders), fmtMoney(v.sales), fmtPct(v.orders / oc.valid)]) })
-    });
-    const binLabel = ([lo, hi]) => hi === Infinity ? `$${lo}+` : `$${lo}–${hi}`;
-    setCard('aovdist', {
-        title: '订单金额分布', sub: `客单价 ${isFinite(oc.aov) ? fmtMoney(oc.aov) : '—'}`,
-        draw: (b, w) => columnChart(b, w, { labels: AOV_BINS.map(binLabel), values: oc.aovBins, fmt: (v, axis) => axis ? fmtCompact(v) : fmtInt(v) + ' 单', tipTitle: i => '订单金额 ' + binLabel(AOV_BINS[i]), labelEvery: 1, color: 'var(--series-3)' }),
-        table: () => ({ head: ['订单金额', '订单数', '占比'], num: [1, 2], rows: AOV_BINS.map((bn, i) => [binLabel(bn), fmtInt(oc.aovBins[i]), fmtPct(oc.aovBins[i] / (oc.valid || 1))]) })
+    $('orderStats').innerHTML = parts.join('') || '<div class="empty" style="padding:8px 0">选择订单数据后显示店铺整体订单</div>';
+    if (!vc) { $('products').innerHTML = ''; return; }
+    renderTable($('products'), 'products', {
+        defaultKey: 'gmv', limit: 10, empty: '视频数据里没有商品信息',
+        rows: [...vc.products.values()],
+        cols: [
+            { key: 'name', label: '视频带货商品', html: p => `<span style="font-weight:500">${esc(p.name.slice(0, 70))}</span><div class="meta">商品 ID ${esc(p.id)}</div>` },
+            { key: 'videos', label: '视频', num: true, val: p => p.videos, fmt: fmtInt },
+            { key: 'selling', label: '出单视频', num: true, val: p => p.selling, fmt: fmtInt },
+            { key: 'creators', label: '达人', num: true, val: p => p.creators.size, fmt: fmtInt, cls: 'hide-sm' },
+            { key: 'orders', label: '订单', num: true, val: p => p.orders, fmt: fmtInt },
+            { key: 'gmv', label: 'GMV', num: true, val: p => p.gmv, fmt: fmtMoney0, bar: true }
+        ]
     });
 }
-function renderVideos(vc, vp, range) {
-    const ds = dayList(range);
-    setCard('vdaily', {
-        title: '每日发布视频', sub: '出单视频 = 带来至少 1 笔订单的视频',
-        legend: [{ name: '发布视频', color: 'var(--series-1)', line: true }, { name: '出单视频', color: 'var(--series-2)', line: true }],
-        draw: (b, w) => lineChart(b, w, {
-            labels: ds.map(md), fmt: (v, axis) => axis ? fmtCompact(v) : fmtInt(v) + ' 条', tipTitle: i => ds[i], height: 200,
-            series: [{ name: '发布视频', color: 'var(--series-1)', values: ds.map(d => vc.byDay.get(d).posted) }, { name: '出单视频', color: 'var(--series-2)', values: ds.map(d => vc.byDay.get(d).selling) }]
-        }),
-        table: () => ({ head: ['日期', '发布视频', '出单视频', '视频 GMV'], num: [1, 2, 3], rows: ds.map(d => { const v = vc.byDay.get(d); return [d, fmtInt(v.posted), fmtInt(v.selling), fmtMoney(v.gmv)]; }) })
-    });
-    const cs = [...vc.creators.values()].sort((a, b) => b.gmv - a.gmv || b.views - a.views);
-    setCard('creators', {
-        title: '达人 GMV 排行', sub: '前 10',
-        draw: b => barList(b, cs.slice(0, 10).map(c => ({ label: c.name, href: 'https://www.tiktok.com/@' + encodeURIComponent(c.name), sub: `${fmtInt(c.videos)} 条视频 · ${fmtCompact(c.views)} 播放`, value: c.gmv,
-            tip: [{ label: 'GMV', value: fmtMoney(c.gmv) }, { label: '视频', value: fmtInt(c.videos) }, { label: '出单视频', value: fmtInt(c.selling) }, { label: '播放', value: fmtInt(c.views) }, { label: '订单', value: fmtInt(c.orders) }] })), { fmt: fmtMoney0, color: 'var(--series-1)' }),
-        table: () => ({ head: ['达人', '视频', '出单视频', '播放', '订单', 'GMV'], num: [1, 2, 3, 4, 5], rows: cs.map(c => [c.name, fmtInt(c.videos), fmtInt(c.selling), fmtInt(c.views), fmtInt(c.orders), fmtMoney(c.gmv)]) })
-    });
-    const steps = [['播放', vc.views], ['商品曝光', vc.imp], ['商品点击', vc.clicks], ['订单', vc.orders]];
-    setCard('vfunnel', {
-        title: '视频转化', sub: '这段时间发布的视频合计',
-        draw: b => barList(b, steps.map(([k, v], i) => ({ label: k, sub: i ? `上一步的 ${fmtPct(steps[i - 1][1] ? v / steps[i - 1][1] : NaN)}` : '', value: v, tip: [{ label: k, value: fmtInt(v) }] })), { fmt: v => fmtCompact(v), color: 'var(--series-3)' }),
-        table: () => ({ head: ['环节', '数量', '占上一步'], num: [1, 2], rows: steps.map(([k, v], i) => [k, fmtInt(v), i ? fmtPct(steps[i - 1][1] ? v / steps[i - 1][1] : NaN) : '']) })
-    });
-    const tv = vc.list.slice().sort((a, b) => b.gmv - a.gmv || b.views - a.views).slice(0, 15);
-    setCard('videos', {
-        title: '视频 GMV 排行', sub: '前 15',
-        draw: b => {
-            if (!tv.length) { b.innerHTML = '<div class="empty">这段时间没有发布的视频</div>'; return; }
-            b.innerHTML = `<div class="tablewrap"><table><thead><tr><th>#</th><th>视频</th><th class="n">播放</th><th class="n">点击率</th><th class="n">订单</th><th class="n">GMV</th></tr></thead><tbody>${tv.map((v, i) =>
-                `<tr><td>${i + 1}</td><td><a href="https://www.tiktok.com/@${encodeURIComponent(v.creator)}/video/${esc(v.id)}" target="_blank" rel="noopener">${esc(v.creator)}</a> <span class="s">${md(v.day)}</span><div class="s">${esc((v.info || '').slice(0, 80))}</div></td><td class="n">${fmtInt(v.views)}</td><td class="n">${fmtPct(v.imp ? v.clicks / v.imp : NaN)}</td><td class="n">${fmtInt(v.orders)}</td><td class="n">${fmtMoney(v.gmv)}</td></tr>`).join('')}</tbody></table></div>`;
-        }
-    });
-}
-function clearKind(keys, text) { for (const k of keys) { cards.delete(k); const el = document.querySelector(`[data-card="${k}"]`); if (el) el.innerHTML = `<div class="empty">${text}</div>`; } }
+let resizeT, lastW = 0;
+new ResizeObserver(() => { const w = $('out').clientWidth; if (Math.abs(w - lastW) < 8) return; lastW = w; clearTimeout(resizeT); resizeT = setTimeout(renderMainChart, 120); }).observe($('out'));
+$('metrics').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b) return; state.metric = b.dataset.m; save({ metric: state.metric }); renderMetrics(); });
 
 /* ======================== 主流程 ======================== */
 const state = Object.assign({ period: 'lastweek', custom: null }, load());
@@ -596,7 +449,7 @@ async function refresh() {
     const range = periodOf(state.period, state.custom), prev = prevOf(range);
     document.querySelectorAll('#pills button').forEach(b => b.classList.toggle('on', b.dataset.p === state.period));
     $('custom').classList.toggle('show', state.period === 'custom');
-    $('range').textContent = `${range[0]} 至 ${range[1]},共 ${days(...range)} 天 · 对比上期 ${prev[0]} 至 ${prev[1]}`;
+    $('range').textContent = `${range[0]} 至 ${range[1]} · ${days(...range)} 天`;
     $('reload').disabled = true;
     $('out').classList.add('loading');   // 刷新时保留旧画面、降低透明度,不闪
     try {
@@ -606,16 +459,19 @@ async function refresh() {
         const secs = ((performance.now() - t0) / 1000).toFixed(1);
         msg(''); progress(null);
         const loaded = [...reading.values()].reduce((s, p) => s + p.n, 0);
-        if (loaded) $('range').textContent += ` · 读取 ${fmtInt(loaded)} 行,${secs} 秒`;
+        if (loaded) $('range').title = `读取 ${fmtInt(loaded)} 行,用时 ${secs} 秒`;
         $('out').hidden = false;
         const oc = orders && orderStats(orders, range), op = orders && orderStats(orders, prev);
         const vc = videos && videoStats(videos, range), vp = videos && videoStats(videos, prev);
-        renderKpis(oc, op, vc, vp, range);
-        insights(oc, op, vc, vp, range);
-        if (oc) renderOrders(oc, op, range, prev); else clearKind(['sales', 'orders', 'status', 'heat', 'sku', 'state', 'aovdist'], '没有选择订单数据');
-        if (vc) renderVideos(vc, vp, range); else clearKind(['vdaily', 'creators', 'vfunnel', 'videos'], '没有选择视频数据');
-        const lbl = [$('srcOrder'), $('srcVideo')].map(s => s.selectedIndex > 0 ? s.options[s.selectedIndex].text.replace(/\s*\(\d+ 张表\)$/, '') : '').filter(Boolean);
-        $('eyebrow').textContent = lbl.length ? [...new Set(lbl)].join(' / ') : 'TikTok Shop';
+        if (vc) { view = { vc, vp, range, prev }; renderMetrics(); renderInsights(vc, vp, oc); renderCreators(vc, vp); renderVideos(vc); }
+        else {
+            view = null;
+            for (const id of ['metrics', 'legend', 'insights', 'creators', 'videos']) $(id).innerHTML = '';
+            $('mainChart').innerHTML = '<div class="empty">请在上方选择视频数据</div>';
+        }
+        renderOrderSide(vc, oc, op);
+        const lbl = [$('srcVideo'), $('srcOrder')].map(s => s.selectedIndex > 0 ? s.options[s.selectedIndex].text.replace(/\s*\(\d+ 张表\)$/, '') : '').filter(Boolean);
+        $('shop').textContent = lbl.length ? [...new Set(lbl)].join(' / ') : 'TikTok Shop';
         markRendered();
     } catch (e) {
         progress(null);
@@ -652,7 +508,7 @@ async function init() {
     try {
         const th = await bitable.bridge.getTheme();
         document.documentElement.dataset.theme = /dark/i.test(th) ? 'dark' : 'light';
-        bitable.bridge.onThemeChange(ev => { document.documentElement.dataset.theme = /dark/i.test((ev && ev.data && ev.data.theme) || '') ? 'dark' : 'light'; cards.forEach((_, k) => paintCard(k)); });
+        bitable.bridge.onThemeChange(ev => { document.documentElement.dataset.theme = /dark/i.test((ev && ev.data && ev.data.theme) || '') ? 'dark' : 'light'; renderMainChart(); });
     } catch (e) {}
     rebuildSources();
     const onTablesChanged = async () => {
