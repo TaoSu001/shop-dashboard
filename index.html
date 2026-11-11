@@ -10,15 +10,22 @@
   --bg: #ffffff; --bg-2: #f5f5f7; --text: #1d1d1f; --text-2: #6e6e73; --muted: #86868b;
   --line: #e8e8ed; --grid: #f0f0f2; --axis: #d2d2d7; --hover: #f5f5f7;
   --accent: #0071e3; --accent-soft: rgba(0,113,227,.10); --prev: #c7c7cc;
-  --up: #1a7f37; --down: #d70015; --new: #0071e3;
+  --up: #1a7f37; --down: #d70015; --new: #0071e3; --c2: #e07a10;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #1c1c1e; --bg-2: #2c2c2e; --text: #f5f5f7; --text-2: #a1a1a6; --muted: #8e8e93;
   --line: #38383a; --grid: #2c2c2e; --axis: #48484a; --hover: #2c2c2e;
   --accent: #0a84ff; --accent-soft: rgba(10,132,255,.16); --prev: #545458;
-  --up: #30d158; --down: #ff453a; --new: #0a84ff;
+  --up: #30d158; --down: #ff453a; --new: #0a84ff; --c2: #ff9f0a;
 }
+.lock { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 18px 0 6px; font-size: 13px; color: var(--text-2); }
+.lock input { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 5px 8px; font-size: 13px; width: 220px; }
+.lock .err { color: var(--down); }
+body.locked #srcbar, body.locked #modes, body.locked #range, body.locked #updated, body.locked #custom { display: none !important; }
+.lock[hidden], #dlbar[hidden], #trendBody[hidden], section[hidden], .size[hidden] { display: none !important; }
+h3.sub { font-size: 15px; font-weight: 600; margin: 28px 0 8px; }
+.spark { display: block; }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 body { font: 14px/1.47 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
@@ -103,6 +110,8 @@ section { margin-top: 40px; }
 .tbl .who a:hover { color: var(--accent); }
 .tbl .meta { font-size: 12px; color: var(--muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px; }
 .badge { display: inline-block; font-size: 10px; font-weight: 600; color: var(--new); background: var(--accent-soft); border-radius: 4px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
+.badge.paid { color: var(--text-2); background: var(--bg-2); border: 1px solid var(--line); }
+.seg[hidden] { display: none; }
 .bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .bar span.track { width: 64px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; flex: none; }
 .bar span.track i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
@@ -133,22 +142,29 @@ body.dash-view #srcbar { display: none; }
       <div class="seg" id="pills" role="group" aria-label="时间段">
         <button data-p="lastweek">上周</button><button data-p="thisweek">本周</button><button data-p="7">7 天</button><button data-p="28">28 天</button><button data-p="lastmonth">上月</button><button data-p="custom">自定义</button>
       </div>
-      <button class="link" id="reload" title="重新从表格读取数据">刷新</button>
+      <button class="link" id="reload" title="重新读取数据(数据由导出助手写入 GitHub)">刷新</button><button class="link" id="lockBtn" hidden title="清除本机记住的团队密码">锁定</button>
     </div>
   </header>
   <div class="sub-bar">
+    <span class="seg" id="modes" role="group" aria-label="达人类型" hidden><button data-mode="all">全部</button><button data-mode="organic">纯佣</button><button data-mode="paid">付费</button></span>
     <span id="range"></span>
+    <span id="updated" style="color:var(--muted)"></span>
     <span class="custom" id="custom"><input type="date" id="cs" aria-label="开始日期"> – <input type="date" id="ce" aria-label="结束日期"> <button class="link" id="apply">应用</button></span>
     <span id="srcbar" style="display:inline-flex;gap:12px;flex-wrap:wrap;align-items:center">
       <label>视频 <select id="srcVideo"></select></label>
       <label>订单 <select id="srcOrder"></select></label>
       <button id="saveCfg" class="primary" hidden>保存到仪表盘</button>
     </span>
+    <span id="dlbar" hidden style="display:inline-flex;gap:4px;align-items:center"><select id="dlSet" aria-label="下载哪类数据"></select><button class="link" id="dlBtn" title="按当前店铺和日期解密并下载 CSV">下载 CSV</button></span>
     <span class="size" id="size" title="调整侧边栏大小(飞书不一定支持)"><button data-s="small">小</button><button data-s="medium">中</button><button data-s="large">大</button></span>
   </div>
   <div class="msg" id="cfgHint" hidden>选好店铺和默认时间段后点「保存到仪表盘」,之后可以在仪表盘里全屏查看。</div>
   <div class="progress" id="progress"><i></i></div>
-  <div id="msg" class="msg">正在连接多维表格…</div>
+  <div id="msg" class="msg">正在启动…</div>
+  <div class="lock" id="lock" hidden>
+    <span>数据存放在 GitHub,已加密。输入团队密码查看(本机会记住):</span>
+    <input type="password" id="pw" autocomplete="off" aria-label="团队密码"> <button class="primary" id="unlock">解锁</button> <span class="err" id="lockMsg"></span>
+  </div>
 
   <div id="out" hidden>
     <div class="metrics" id="metrics" role="tablist"></div>
@@ -161,8 +177,21 @@ body.dash-view #srcbar { display: none; }
     </section>
 
     <section>
-      <div class="sec-h"><h2>视频</h2><p>播放、订单、GMV 为写入表格时的累计值</p></div>
+      <div class="sec-h"><h2>视频</h2><p>播放、订单、GMV 为导出时的累计值</p></div>
       <div class="scroll" id="videos"></div>
+    </section>
+
+    <section id="trendSec" hidden>
+      <div class="sec-h"><h2>视频走势</h2><p><span id="trendNote"></span></p></div>
+      <div id="trendBody">
+        <div class="metrics" id="trendMetrics" role="tablist" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:8px"></div>
+        <div class="chart-main"><div class="legend" id="trendLegend"></div><div class="chart" id="trendChart"></div></div>
+        <ul class="insights" id="trendInsights"></ul>
+        <h3 class="sub" id="lifeTitle"></h3>
+        <div class="chart" id="lifeChart"></div>
+        <h3 class="sub">视频明细 <span style="font-size:12px;font-weight:400;color:var(--muted)">区间内每天的数据加总 · 点表头排序</span></h3>
+        <div class="scroll" id="trendVideos"></div>
+      </div>
     </section>
 
     <section>
@@ -170,9 +199,17 @@ body.dash-view #srcbar { display: none; }
       <div class="stats" id="orderStats"></div>
       <div class="scroll" id="products"></div>
     </section>
+
+    <section id="gmvSec" hidden>
+      <div class="sec-h"><h2>GMV Max 广告</h2><p><span id="gmvNote"></span> · 全店广告数据,不区分付费 / 纯佣</p></div>
+      <div class="metrics" id="gmvMetrics" role="tablist" style="margin-top:8px"></div>
+      <div class="chart-main"><div class="legend" id="gmvLegend"></div><div class="chart" id="gmvChart"></div></div>
+      <div class="stats" id="gmvStats"></div>
+      <div class="scroll" id="campaigns"></div>
+    </section>
   </div>
 </div>
 <div class="tip" id="tip" role="tooltip"></div>
-<script type="module" src="app.js?v=20261109c"></script>
+<script type="module" src="app.js?v=20261110f"></script>
 </body>
 </html>
