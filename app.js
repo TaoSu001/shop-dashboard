@@ -158,10 +158,15 @@ function fillSelect(sel, opts, saved, guess) {
 }
 
 /* ======================== 统计 ======================== */
+// 寄样单:订单表「Normal or Pre-order」不是 Normal 的(寄样单这一列是空的,金额为 0)
+//   Pre-order 是正常付款的预售单,不算寄样
+const isSample = r => !/^(normal|pre-?order)$/i.test(cellText(r['Normal or Pre-order']).trim());
+// 店铺订单只算正常订单(不含寄样单)
 function orderStats(rows, [a, b]) {
     const orders = new Map();
     let qty = 0, gmv = 0;
     for (const r of rows) {
+        if (isSample(r)) continue;
         const d = dayOf(cellNum(r['Created Time']) || null);
         if (!d || d < a || d > b) continue;
         const id = cellText(r['Order ID']).trim();
@@ -174,6 +179,36 @@ function orderStats(rows, [a, b]) {
     let valid = 0, sales = 0;
     for (const o of orders.values()) if (!o.canceled) { valid++; sales += o.amount; }
     return { valid, sales, qty, gmv, aov: valid ? sales / valid : NaN };
+}
+// 寄样单数(按下单日期,一个订单号算一单,已取消的不算);收件达人 = 订单的 Buyer Username,按付费名单分纯佣 / 付费
+function sampleStats(rows, [a, b]) {
+    const seen = new Map();
+    for (const r of rows) {
+        if (!isSample(r)) continue;
+        const d = dayOf(cellNum(r['Created Time']) || null);
+        if (!d || d < a || d > b) continue;
+        const id = cellText(r['Order ID']).trim();
+        if (!id || seen.has(id)) continue;
+        if (/cancel/i.test(cellText(r['Order Status']))) { seen.set(id, null); continue; }
+        const who = normH(cellText(r['Buyer Username']));
+        seen.set(id, { day: d, who, paid: isPaidName(who) });
+    }
+    const byDay = new Map(dayList([a, b]).map(d => [d, { org: 0, paid: 0 }]));
+    const who = { org: new Set(), paid: new Set() };
+    let org = 0, paid = 0;
+    for (const s of seen.values()) {
+        if (!s) continue;
+        const g = s.paid ? 'paid' : 'org';
+        byDay.get(s.day)[g]++; if (s.who) who[g].add(s.who);
+        if (s.paid) paid++; else org++;
+    }
+    return { org, paid, byDay, who };
+}
+// 只看当前模式(全部 / 纯佣 / 付费)的寄样
+function sampleView(sc) {
+    const mode = curMode(), pick = o => mode === 'all' ? o.org + o.paid : mode === 'paid' ? o.paid : o.org;
+    const who = mode === 'all' ? new Set([...sc.who.org, ...sc.who.paid]) : sc.who[mode === 'paid' ? 'paid' : 'org'];
+    return { n: pick(sc), creators: who.size, day: d => { const x = sc.byDay.get(d); return x ? pick(x) : 0; } };
 }
 // 视频的商品列:"商品名(商品ID), 商品名2(ID2)" → 取第一个商品
 function firstProduct(s) {
@@ -309,30 +344,110 @@ const METRICS = [
     { key: 'selling', label: '出单视频', total: s => s.selling, day: d => d.selling, fmt: fmtInt, axis: fmtCompact, sub: s => `出单率 ${fmtPct(s.count ? s.selling / s.count : NaN)}` },
     { key: 'posted', label: '发布视频', total: s => s.count, day: d => d.posted, fmt: fmtInt, axis: fmtCompact, sub: s => `${fmtInt(s.creators.size)} 位达人发布` },
     { key: 'sellers', label: '出单达人', total: s => s.sellingCreators, day: d => d.sellers.size, fmt: fmtInt, axis: fmtCompact, sub: s => `占发布达人 ${fmtPct(s.creators.size ? s.sellingCreators / s.creators.size : NaN)}` },
-    { key: 'orders', label: '视频订单', total: s => s.orders, day: d => d.orders, fmt: fmtInt, axis: fmtCompact, sub: s => `转化率 ${fmtPct(s.clicks ? s.orders / s.clicks : NaN)}` }
+    { key: 'orders', label: '视频订单', total: s => s.orders, day: d => d.orders, fmt: fmtInt, axis: fmtCompact, sub: s => `转化率 ${fmtPct(s.clicks ? s.orders / s.clicks : NaN)}` },
+    // 寄样来自订单表:没选订单数据时不显示
+    { key: 'samples', label: '寄样', need: 'samples', total: s => s.samples.n, day: (d, s) => s.samples.day(d), fmt: fmtInt, axis: fmtCompact, sub: s => `${fmtInt(s.samples.creators)} 位达人收样` }
 ];
 let view = null;   // 最近一次统计结果,切换指标 / 改变宽度时重画
+const metricsOn = () => METRICS.filter(m => !m.need || (view.vc[m.need] && view.vp[m.need]));
 function renderMetrics() {
     const { vc, vp } = view;
-    const cur = state.metric && METRICS.find(m => m.key === state.metric) ? state.metric : 'gmv';
-    $('metrics').innerHTML = METRICS.map(m => `<button class="metric ${m.key === cur ? 'on' : ''}" role="tab" aria-selected="${m.key === cur}" data-m="${m.key}">
+    const list = metricsOn();
+    const cur = state.metric && list.find(m => m.key === state.metric) ? state.metric : 'gmv';
+    $('metrics').classList.toggle('six', list.length > 5);
+    $('metrics').innerHTML = list.map(m => `<button class="metric ${m.key === cur ? 'on' : ''}" role="tab" aria-selected="${m.key === cur}" data-m="${m.key}">
         <div class="k">${m.label}</div><div class="v">${m.fmt(m.total(vc))}</div><div class="d">${deltaText(m.total(vc), m.total(vp))}</div><div class="d">${esc(m.sub(vc))}</div></button>`).join('');
     renderMainChart();
 }
 function renderMainChart() {
     if (!view) return;
     const { vc, vp, range, prev } = view;
-    const m = METRICS.find(x => x.key === state.metric) || METRICS[0];
+    const m = metricsOn().find(x => x.key === state.metric) || METRICS[0];
     const ds = dayList(range), pds = dayList(prev);
     $('legend').innerHTML = `<span><i style="background:var(--accent)"></i>${m.label} · 本期</span><span><i style="background:var(--prev)"></i>上期 ${md(prev[0])}–${md(prev[1])}</span>`;
     const el = $('mainChart');
     lineChart(el, el.clientWidth, {
         labels: ds.map(md), fmt: m.fmt, axisFmt: m.axis, tipTitle: i => `${ds[i]} ${WD[(new Date(ds[i] + 'T00:00:00Z').getUTCDay() + 6) % 7]}`,
         series: [
-            { color: 'var(--prev)', values: pds.map(d => { const v = vp.byDay.get(d); return v ? m.day(v) : 0; }), label: i => `上期 ${md(pds[i] || '')}` },
-            { color: 'var(--accent)', area: true, values: ds.map(d => m.day(vc.byDay.get(d))), label: () => '本期' }
+            { color: 'var(--prev)', values: pds.map(d => { const v = vp.byDay.get(d); return v ? m.day(v, vp, d) : 0; }), label: i => `上期 ${md(pds[i] || '')}` },
+            { color: 'var(--accent)', area: true, values: ds.map(d => m.day(vc.byDay.get(d), vc, d)), label: () => '本期' }
         ]
     });
+}
+
+/* ======================== 目标(每店每月,纯佣 / 付费分开) ======================== */
+// 目标在导出助手的设置页里填,存成 GitHub 上的 targets.bin:[店铺, 月份, 视频纯佣, 视频付费, 寄样纯佣, 寄样付费]
+// 所选时间段的目标 = 每天按「当月目标 ÷ 当月天数」累加(选整月就是月目标)
+let targetMap = null;
+async function readTargets() {
+    const meta = dataManifest && dataManifest.targets;
+    if (!meta) return new Map();
+    const t = await fetchFile('targets.bin', meta.h, '目标');
+    return new Map(t.rows.map(r => [`${r[0]}|${r[1]}`, r]));
+}
+const monthDays = m => new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).getUTCDate();
+function targetSum(shops, [a, b], col) {
+    let v = 0, has = false;
+    for (const d of dayList([a, b])) {
+        const m = d.slice(0, 7);
+        for (const s of shops) { const r = targetMap && targetMap.get(`${s}|${m}`); if (r && r[col] != null) { v += r[col] / monthDays(m); has = true; } }
+    }
+    return has ? v : null;
+}
+// 发布视频数(按发布日期,去重)和寄样单数,分纯佣 / 付费
+function goalCounts(videoRows, orderRows, [a, b]) {
+    const out = { vOrg: null, vPaid: null, sOrg: null, sPaid: null };
+    if (videoRows) {
+        const seen = new Set(); out.vOrg = 0; out.vPaid = 0;
+        for (const r of videoRows) {
+            const d = dayOf(cellNum(r['Time']) || null);
+            if (!d || d < a || d > b) continue;
+            const id = cellText(r['Video ID']).trim();
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            if (isPaidName(r['Creator name'])) out.vPaid++; else out.vOrg++;
+        }
+    }
+    if (orderRows) { const s = sampleStats(orderRows, [a, b]); out.sOrg = s.org; out.sPaid = s.paid; }
+    return out;
+}
+const GOALS = [
+    { key: 'vOrg', col: 2, label: '发布视频 · 纯佣', grp: 'organic' },
+    { key: 'vPaid', col: 3, label: '发布视频 · 付费', grp: 'paid' },
+    { key: 'sOrg', col: 4, label: '寄样 · 纯佣', grp: 'organic' },
+    { key: 'sPaid', col: 5, label: '寄样 · 付费', grp: 'paid' }
+];
+function goalShops() {
+    const v = $('srcVideo').value || $('srcOrder').value;
+    if (v.startsWith('shop:')) return [v.slice(5)];
+    if (v === 'all') return [...new Set([...setShops('videos'), ...setShops('orders')])];
+    return [];
+}
+function renderGoals(videoRows, orderRows, range) {
+    const shops = goalShops();
+    if (!shops.length || (!videoRows && !orderRows)) { $('goalSec').hidden = true; return; }
+    $('goalSec').hidden = false;
+    const m = range[1].slice(0, 7), mStart = m + '-01', mEnd = `${m}-${pad(monthDays(m))}`, mtd = [mStart, range[1]];
+    const cur = goalCounts(videoRows, orderRows, range);
+    const mc = goalCounts(videoRows, orderRows, mtd);
+    const mode = curMode();
+    const list = GOALS.filter(g => (mode === 'all' || g.grp === mode) && (paidSet || g.grp !== 'paid') && cur[g.key] != null);
+    const anyTarget = list.some(g => targetSum(shops, [mStart, mEnd], g.col) != null);
+    $('goalNote').textContent = anyTarget
+        ? `所选时间段的目标 = 月目标按天折算 · 视频按发布日期,寄样按下单日期(已取消的不算)`
+        : '还没有设置这个月的目标:在「TikTok 导出助手」设置页 →「每月目标」里填写';
+    $('goals').innerHTML = list.map(g => {
+        const n = cur[g.key], t = targetSum(shops, range, g.col);
+        const mt = targetSum(shops, [mStart, mEnd], g.col), mExp = targetSum(shops, mtd, g.col);
+        const pct = t ? n / t : NaN;
+        const status = !t ? '<span style="color:var(--muted)">未设目标</span>'
+            : n >= t ? `<span class="up">完成 ${fmtPct(pct)}</span>` : `<span class="${range[1] < todayLocal() ? 'down' : ''}">完成 ${fmtPct(pct)} · 差 ${fmtInt(Math.ceil(t - n))}</span>`;
+        const month = mt != null ? `${m.slice(5)} 月累计 ${fmtInt(mc[g.key])} / ${fmtInt(mt)}${range[1] < mEnd ? `(按进度应到 ${fmtInt(Math.round(mExp))})` : ''}` : '';
+        return `<div class="goal"><div class="k">${g.label}</div>
+            <div class="v">${fmtInt(n)}${t ? `<small>/ ${fmtInt(Math.round(t))}</small>` : ''}</div>
+            <div class="gbar"><i class="${t && n >= t ? 'done' : ''}" style="width:${t ? Math.min(100, pct * 100).toFixed(1) : 0}%"></i></div>
+            <div class="d">${status}</div>${month ? `<div class="d">${month}</div>` : ''}</div>`;
+    }).join('');
 }
 
 /* ======================== 付费 / 纯佣 ======================== */
@@ -415,8 +530,9 @@ function renderVideos(vc) {
 function renderOrderSide(vc, oc, op) {
     const parts = [];
     if (oc) {
-        if (curMode() !== 'all') parts.push(`<div class="stat" style="flex-basis:100%"><div class="k" style="color:var(--muted)">店铺订单和销售额是全店整体数据,订单表里没有达人信息,不区分付费 / 纯佣</div></div>`);
-        parts.push(`<div class="stat"><div class="k">店铺订单</div><div class="v">${fmtInt(oc.valid)}<small>${deltaText(oc.valid, op.valid)}</small></div></div>`);
+        if (curMode() !== 'all') parts.push(`<div class="stat" style="flex-basis:100%"><div class="k" style="color:var(--muted)">店铺订单和销售额是全店整体数据,不区分付费 / 纯佣;寄样单按收件达人区分</div></div>`);
+        parts.push(`<div class="stat"><div class="k">店铺订单(不含寄样)</div><div class="v">${fmtInt(oc.valid)}<small>${deltaText(oc.valid, op.valid)}</small></div></div>`);
+        if (oc.samples) parts.push(`<div class="stat"><div class="k">${modeTag() ? modeTag() + '的' : ''}寄样单</div><div class="v">${fmtInt(oc.samples.n)}<small>${deltaText(oc.samples.n, op.samples.n)}</small></div></div>`);
         parts.push(`<div class="stat"><div class="k">店铺销售额</div><div class="v">${fmtMoney0(oc.sales)}<small>${deltaText(oc.sales, op.sales)}</small></div></div>`);
         parts.push(`<div class="stat"><div class="k">客单价</div><div class="v">${isFinite(oc.aov) ? fmtMoney(oc.aov) : '—'}</div></div>`);
         if (vc && oc.sales > 0) parts.push(`<div class="stat"><div class="k">${modeTag() ? modeTag() + '的' : ''}视频 GMV 相当于销售额的</div><div class="v">${fmtPct(vc.gmv / oc.sales)}<small>口径不同,仅供参考</small></div></div>`);
@@ -809,8 +925,10 @@ async function refresh() {
     try {
         reading.clear();
         const t0 = performance.now();
-        const [orders, allVideos, gm, paid] = await Promise.all([readSource('order', prev[0], range[1]), readSource('video', prev[0], range[1]), readGmv(prev[0], range[1]), readPaid().catch(() => null)]);
-        paidSet = paid;
+        // 目标要看「本月累计」:数据至少从所选时间段最后一天所在月的 1 号读起
+        const from = [prev[0], range[1].slice(0, 8) + '01'].sort()[0];
+        const [orders, allVideos, gm, paid, tg] = await Promise.all([readSource('order', from, range[1]), readSource('video', from, range[1]), readGmv(prev[0], range[1]), readPaid().catch(() => null), readTargets().catch(() => new Map())]);
+        paidSet = paid; targetMap = tg;
         $('modes').hidden = !paidSet;
         document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === curMode()));
         // 付费 / 纯佣:按达人 handle 过滤视频(达人、视频、视频带货商品都跟着变;店铺订单和 GMV Max 不区分)
@@ -825,6 +943,12 @@ async function refresh() {
         $('out').hidden = false;
         const oc = orders && orderStats(orders, range), op = orders && orderStats(orders, prev);
         const vc = videos && videoStats(videos, range), vp = videos && videoStats(videos, prev);
+        if (orders) {
+            const sc = sampleView(sampleStats(orders, range)), sp = sampleView(sampleStats(orders, prev));
+            oc.samples = sc; op.samples = sp;
+            if (vc) { vc.samples = sc; vp.samples = sp; }
+        }
+        renderGoals(allVideos, orders, range);
         if (vc) { view = { vc, vp, range, prev }; renderMetrics(); renderInsights(vc, vp, oc); renderCreators(vc, vp); renderVideos(vc); }
         else {
             view = null;
@@ -877,6 +1001,7 @@ function liveUrls() {
         for (const [shop, months] of Object.entries(shops))
             for (const [m, meta] of Object.entries(months)) out.add(`${DATA_BASE}${set}/${shop}/${m}.bin?h=${meta.h || ''}`);
     if (dataManifest.paid) out.add(`${DATA_BASE}paid.bin?h=${dataManifest.paid.h || ''}`);
+    if (dataManifest.targets) out.add(`${DATA_BASE}targets.bin?h=${dataManifest.targets.h || ''}`);
     return out;
 }
 let pruned = '';

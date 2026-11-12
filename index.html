@@ -64,7 +64,18 @@ select, input[type=date] { border: 1px solid var(--line); background: var(--bg);
 
 /* 指标标签(点选切换下方大图) */
 .metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 28px; border-bottom: 1px solid var(--line); }
-@media (max-width: 760px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.metrics.six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 760px) { .metrics, .metrics.six { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* 目标完成 */
+.goals { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
+.goal { background: var(--bg-2); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.goal .k { font-size: 13px; color: var(--text-2); }
+.goal .v { font-size: 26px; font-weight: 600; letter-spacing: -.015em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.goal .v small { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 4px; }
+.goal .d { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+.gbar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 8px 0 6px; }
+.gbar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.gbar i.done { background: var(--up); }
 .metric { text-align: left; border: 0; background: none; padding: 10px 16px 14px 0; cursor: pointer; position: relative; min-width: 0; }
 .metric .k { font-size: 13px; color: var(--text-2); }
 .metric .v { font-size: 28px; font-weight: 600; letter-spacing: -.015em; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -171,6 +182,11 @@ body.dash-view #srcbar { display: none; }
     <div class="chart-main"><div class="legend" id="legend"></div><div class="chart" id="mainChart"></div></div>
     <ul class="insights" id="insights"></ul>
 
+    <section id="goalSec" hidden>
+      <div class="sec-h"><h2>目标完成</h2><p id="goalNote"></p></div>
+      <div class="goals" id="goals"></div>
+    </section>
+
     <section>
       <div class="sec-h"><h2>达人</h2><p>按视频发布日期统计 · 点表头排序 · 「新」= 上一期没有发过视频</p></div>
       <div class="scroll" id="creators"></div>
@@ -210,6 +226,6 @@ body.dash-view #srcbar { display: none; }
   </div>
 </div>
 <div class="tip" id="tip" role="tooltip"></div>
-<script type="module" src="app.js?v=20261110f"></script>
+<script type="module" src="app.js?v=20261112a"></script>
 </body>
 </html>
