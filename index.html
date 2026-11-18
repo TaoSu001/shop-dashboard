@@ -122,6 +122,7 @@ section { margin-top: 40px; }
 .tbl .meta { font-size: 12px; color: var(--muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px; }
 .badge { display: inline-block; font-size: 10px; font-weight: 600; color: var(--new); background: var(--accent-soft); border-radius: 4px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
 .badge.paid { color: var(--text-2); background: var(--bg-2); border: 1px solid var(--line); }
+.badge.old { color: var(--c2); border: 1px solid var(--c2); background: transparent; }
 .seg[hidden] { display: none; }
 .bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .bar span.track { width: 64px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; flex: none; }
@@ -188,7 +189,7 @@ body.dash-view #srcbar { display: none; }
     </section>
 
     <section>
-      <div class="sec-h"><h2>达人</h2><p>按视频发布日期统计 · 点表头排序 · 「新」= 上一期没有发过视频</p></div>
+      <div class="sec-h"><h2>达人</h2><p>按视频发布日期统计 · 点表头排序 · 「新」= 所选时间段开始前没发过视频(老达人 = 开始前发过)</p></div>
       <div class="scroll" id="creators"></div>
     </section>
 
@@ -212,6 +213,7 @@ body.dash-view #srcbar { display: none; }
 
     <section>
       <div class="sec-h"><h2>出单情况</h2><p>视频带动的商品,以及店铺整体订单</p></div>
+      <div class="stats" id="typeStats"></div>
       <div class="stats" id="orderStats"></div>
       <div class="scroll" id="products"></div>
     </section>
@@ -226,6 +228,6 @@ body.dash-view #srcbar { display: none; }
   </div>
 </div>
 <div class="tip" id="tip" role="tooltip"></div>
-<script type="module" src="app.js?v=20261112a"></script>
+<script type="module" src="app.js?v=20261118b"></script>
 </body>
 </html>

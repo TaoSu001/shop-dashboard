@@ -217,15 +217,17 @@ function firstProduct(s) {
     const m = s.match(/^(.*?)\((\d{6,})\)/);
     return m ? { name: m[1].trim(), id: m[2] } : { name: s.slice(0, 80), id: s.slice(0, 80) };
 }
-function videoStats(rows, [a, b]) {
+function videoStats(rows, [a, b], oldIds) {
     const vids = new Map();
     for (const r of rows) {
         const d = dayOf(cellNum(r['Time']) || null);
         if (!d || d < a || d > b) continue;
         const id = cellText(r['Video ID']).trim();
         if (!id || vids.has(id)) continue;
+        const cid = cellText(r['Creator ID']) || cellText(r['Creator name']);
         vids.set(id, {
-            id, day: d, creator: cellText(r['Creator name']), creatorId: cellText(r['Creator ID']) || cellText(r['Creator name']), info: cellText(r['Video Info']),
+            id, day: d, creator: cellText(r['Creator name']), creatorId: cid, info: cellText(r['Video Info']),
+            old: !!(oldIds && oldIds.has(cid)),
             views: cellNum(r['Video views']), imp: cellNum(r['Product Impressions']), clicks: cellNum(r['Product Clicks']),
             orders: cellNum(r['Attributed SKU orders']), gmv: cellNum(r['Video-attributed GMV']), product: firstProduct(cellText(r['Products']))
         });
@@ -247,8 +249,17 @@ function videoStats(rows, [a, b]) {
     }
     const sum = k => list.reduce((s, v) => s + v[k], 0);
     const sellingCreators = [...creators.values()].filter(c => c.selling > 0).length;
+    // 达人类型:老达人 = 所选时间段开始前发过视频(按全历史判断);新达人 = 这段时间第一次发视频
+    const ty = { old: { creators: new Set(), videos: 0, selling: 0, orders: 0, gmv: 0 }, new: { creators: new Set(), videos: 0, selling: 0, orders: 0, gmv: 0 } };
+    for (const v of list) {
+        const t = v.old ? ty.old : ty.new;
+        t.videos++; t.gmv += v.gmv; t.orders += v.orders; if (v.orders > 0) t.selling++;
+        t.creators.add(v.creatorId);
+    }
+    const mk = t => ({ creators: t.creators.size, videos: t.videos, selling: t.selling, orders: t.orders, gmv: t.gmv });
     return { list, count: list.length, views: sum('views'), imp: sum('imp'), clicks: sum('clicks'), gmv: sum('gmv'), orders: sum('orders'),
-        selling: list.filter(v => v.orders > 0).length, creators, sellingCreators, products, byDay };
+        selling: list.filter(v => v.orders > 0).length, creators, sellingCreators, products, byDay,
+        oldIds: oldIds || null, typeOld: mk(ty.old), typeNew: mk(ty.new) };
 }
 
 /* ======================== 提示框 ======================== */
@@ -342,7 +353,7 @@ function deltaText(cur, prev) {
 const METRICS = [
     { key: 'gmv', label: '视频 GMV', total: s => s.gmv, day: d => d.gmv, fmt: fmtMoney0, axis: v => '$' + fmtCompact(v), sub: s => `${fmtInt(s.orders)} 笔订单` },
     { key: 'selling', label: '出单视频', total: s => s.selling, day: d => d.selling, fmt: fmtInt, axis: fmtCompact, sub: s => `出单率 ${fmtPct(s.count ? s.selling / s.count : NaN)}` },
-    { key: 'posted', label: '发布视频', total: s => s.count, day: d => d.posted, fmt: fmtInt, axis: fmtCompact, sub: s => `${fmtInt(s.creators.size)} 位达人发布` },
+    { key: 'posted', label: '发布视频', total: s => s.count, day: d => d.posted, fmt: fmtInt, axis: fmtCompact, sub: s => `老达人 ${fmtInt(s.typeOld.videos)} 条 · 新达人 ${fmtInt(s.typeNew.videos)} 条` },
     { key: 'sellers', label: '出单达人', total: s => s.sellingCreators, day: d => d.sellers.size, fmt: fmtInt, axis: fmtCompact, sub: s => `占发布达人 ${fmtPct(s.creators.size ? s.sellingCreators / s.creators.size : NaN)}` },
     { key: 'orders', label: '视频订单', total: s => s.orders, day: d => d.orders, fmt: fmtInt, axis: fmtCompact, sub: s => `转化率 ${fmtPct(s.clicks ? s.orders / s.clicks : NaN)}` },
     // 寄样来自订单表:没选订单数据时不显示
@@ -500,7 +511,7 @@ function renderCreators(vc, vp) {
         defaultKey: 'gmv', empty: '这段时间没有达人发布视频',
         rows,
         cols: [
-            { key: 'name', label: '达人', html: c => `<a href="https://www.tiktok.com/@${encodeURIComponent(c.name)}" target="_blank" rel="noopener">${esc(c.name)}</a>${curMode() === 'all' && isPaidName(c.name) ? '<span class="badge paid">付费</span>' : ''}${vp.creators.has(c.id) ? '' : '<span class="badge">新</span>'}<div class="meta">最近发布 ${md(c.last)}</div>` },
+            { key: 'name', label: '达人', html: c => `<a href="https://www.tiktok.com/@${encodeURIComponent(c.name)}" target="_blank" rel="noopener">${esc(c.name)}</a>${curMode() === 'all' && isPaidName(c.name) ? '<span class="badge paid">付费</span>' : ''}${vc.oldIds && vc.oldIds.has(c.id) ? '<span class="badge old">老</span>' : '<span class="badge">新</span>'}<div class="meta">最近发布 ${md(c.last)}</div>` },
             { key: 'videos', label: '视频', num: true, val: c => c.videos, fmt: fmtInt },
             { key: 'selling', label: '出单视频', num: true, val: c => c.selling, fmt: fmtInt },
             { key: 'rate', label: '出单率', num: true, val: c => c.videos ? c.selling / c.videos : 0, fmt: fmtPct, bar: true, cls: 'hide-sm' },
@@ -526,6 +537,16 @@ function renderVideos(vc) {
             { key: 'gmv', label: 'GMV', num: true, val: v => v.gmv, fmt: fmtMoney0, bar: true }
         ]
     });
+}
+/* ======================== 达人类型对比(老 / 新) ======================== */
+// 老达人 = 所选时间段开始前发过视频(按全历史视频判断);新达人 = 这段时间第一次发视频
+function renderTypeStats(vc) {
+    const el = $('typeStats');
+    if (!vc || !vc.typeOld) { el.innerHTML = ''; return; }
+    const mk = (label, t) => `<div class="stat"><div class="k">${label} · 发布视频</div><div class="v">${fmtInt(t.videos)}<small>${fmtInt(t.creators)} 位达人 · 出单 ${fmtInt(t.selling)} 条(${fmtPct(t.videos ? t.selling / t.videos : NaN)})</small></div></div>
+      <div class="stat"><div class="k">${label} · 出单</div><div class="v">${fmtInt(t.orders)} 单<small>GMV ${fmtMoney0(t.gmv)}</small></div></div>`;
+    el.innerHTML = mk('老达人', vc.typeOld) + mk('新达人', vc.typeNew)
+        + `<div class="stat" style="flex-basis:100%"><div class="k" style="color:var(--muted)">老达人 = 所选时间段开始前发过视频的创作者(按全历史判断);新达人 = 这段时间第一次发视频。出单按视频归因。</div></div>`;
 }
 function renderOrderSide(vc, oc, op) {
     const parts = [];
@@ -861,6 +882,13 @@ async function readSource(kind, fromDay, toDay) {
     if (!opt) return null;
     return readSet(kind === 'order' ? 'orders' : 'videos', opt.shops, fromDay, toDay);
 }
+// 全历史(不按日期过滤):达人类型判断用;文件按指纹缓存,只在数据更新后多下载一次
+async function readAllSource(kind) {
+    const v = $(kind === 'order' ? 'srcOrder' : 'srcVideo').value;
+    const opt = srcOpts[kind].find(o => o.v === v);
+    if (!opt) return null;
+    return readSet(kind === 'order' ? 'orders' : 'videos', opt.shops, null, null);
+}
 
 /* ---------- 下载数据(解密后存成 CSV,用 Excel / WPS 打开) ---------- */
 const DL_SETS = [['videos', '视频(按发布时间)', 'Time'], ['orders', '订单(按下单时间)', 'Created Time'], ['vday', '视频逐日(按统计日期)', '统计日期'],
@@ -927,7 +955,7 @@ async function refresh() {
         const t0 = performance.now();
         // 目标要看「本月累计」:数据至少从所选时间段最后一天所在月的 1 号读起
         const from = [prev[0], range[1].slice(0, 8) + '01'].sort()[0];
-        const [orders, allVideos, gm, paid, tg] = await Promise.all([readSource('order', from, range[1]), readSource('video', from, range[1]), readGmv(prev[0], range[1]), readPaid().catch(() => null), readTargets().catch(() => new Map())]);
+        const [orders, allVideos, histVideos, gm, paid, tg] = await Promise.all([readSource('order', from, range[1]), readSource('video', from, range[1]), readAllSource('video').catch(() => null), readGmv(prev[0], range[1]), readPaid().catch(() => null), readTargets().catch(() => new Map())]);
         paidSet = paid; targetMap = tg;
         $('modes').hidden = !paidSet;
         document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === curMode()));
@@ -942,17 +970,24 @@ async function refresh() {
         pruneCache();
         $('out').hidden = false;
         const oc = orders && orderStats(orders, range), op = orders && orderStats(orders, prev);
-        const vc = videos && videoStats(videos, range), vp = videos && videoStats(videos, prev);
+        // 达人类型:区间开始前发过视频 = 老达人(全历史视频判断)
+        const oldIds = new Set();
+        if (histVideos) for (const r of histVideos) {
+            const d = dayOf(cellNum(r['Time']) || null);
+            if (d && d < range[0]) oldIds.add(cellText(r['Creator ID']) || cellText(r['Creator name']));
+        }
+        const vc = videos && videoStats(videos, range, oldIds), vp = videos && videoStats(videos, prev, oldIds);
         if (orders) {
             const sc = sampleView(sampleStats(orders, range)), sp = sampleView(sampleStats(orders, prev));
             oc.samples = sc; op.samples = sp;
             if (vc) { vc.samples = sc; vp.samples = sp; }
         }
         renderGoals(allVideos, orders, range);
-        if (vc) { view = { vc, vp, range, prev }; renderMetrics(); renderInsights(vc, vp, oc); renderCreators(vc, vp); renderVideos(vc); }
+        if (vc) { view = { vc, vp, range, prev }; renderMetrics(); renderInsights(vc, vp, oc); renderCreators(vc, vp); renderVideos(vc); renderTypeStats(vc); }
         else {
             view = null;
             for (const id of ['metrics', 'legend', 'insights', 'creators', 'videos']) $(id).innerHTML = '';
+            $('typeStats').innerHTML = '';
             $('mainChart').innerHTML = '<div class="empty">请在上方选择视频数据</div>';
         }
         renderOrderSide(vc, oc, op);
